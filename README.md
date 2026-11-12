@@ -126,6 +126,40 @@ bash tools/backtest.sh 2023.01.01 2025.12.31   # 期間を指定する場合
 
 ---
 
+## GitHub Actions でバックテストする（PC不要・スマホから実行可）
+
+`.github/workflows/mt5-backtest.yml` は、Windows ランナー上で次の3つを行います。
+1. MT5 をインストールする
+2. EA をコンパイルする（エラー0・警告0を確認）
+3. OANDA デモ口座にログインして、ストラテジーテスターを実行する
+
+### 初回だけの設定（スマホのブラウザでも可）
+1. GitHub でリポジトリを開き、**Settings → Secrets and variables → Actions** に進みます。
+2. 「**New repository secret**」で、次の3つを登録します。
+
+   | 名前 | 内容 |
+   |---|---|
+   | `MT5_LOGIN` | OANDA デモ口座のログインID（数字） |
+   | `MT5_PASSWORD` | デモ口座のパスワード |
+   | `MT5_SERVER` | MT5 のログイン画面に表示されるサーバー名（例：`OANDA-Japan MT5 Demo`） |
+
+3. （任意）**Variables** タブで、次の変数を登録できます。
+   - `MT5_SYMBOL`：銘柄名に接尾辞がある場合（例：`USDJPY.oj1m`）
+   - `MT5_INSTALLER_URL`：OANDA 版の MT5 インストーラーを使う場合
+
+### 実行
+1. **Actions** タブで「MT5 Backtest」を選び、「**Run workflow**」を押します。
+   - 期間・銘柄・モデルは、その場で指定できます。
+2. 終わったら、実行結果の **Summary** に成績の要約が表示されます。
+   - HTML レポートやログは「**mt5-backtest-reports**」からダウンロードできます。
+
+### 補足
+- シークレットが未設定の場合は、コンパイルだけ行います。
+- `MQL5/` を変更してプッシュすると、自動で実行されます。
+- シークレットの値は GitHub がログ上で伏せ字にします。テスターの設定ファイル（パスワードを含む）は、実行後に削除します。
+
+---
+
 ## 主なパラメータ
 
 | パラメータ | 既定値 | 説明 |

@@ -1,0 +1,86 @@
+name: MT5 Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: "開始日 (YYYY.MM.DD、空なら2年前)"
+        required: false
+        default: ""
+      to_date:
+        description: "終了日 (YYYY.MM.DD、空なら今日)"
+        required: false
+        default: ""
+      symbol:
+        description: "銘柄名 (OANDA の接尾辞込み。空なら変数 MT5_SYMBOL か USDJPY)"
+        required: false
+        default: ""
+      model:
+        description: "0=全ティック 1=1分足OHLC 2=始値のみ 4=リアルティック"
+        required: false
+        default: "1"
+  push:
+    paths:
+      - "MQL5/**"
+      - "tools/ci/**"
+      - ".github/workflows/mt5-backtest.yml"
+
+concurrency:
+  group: mt5-backtest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backtest:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+      MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+      MT5_SERVER: ${{ secrets.MT5_SERVER }}
+      MT5_INSTALLER_URL: ${{ vars.MT5_INSTALLER_URL }}
+      BT_SYMBOL: ${{ inputs.symbol || vars.MT5_SYMBOL || 'USDJPY' }}
+      BT_FROM: ${{ inputs.from_date }}
+      BT_TO: ${{ inputs.to_date }}
+      BT_MODEL: ${{ inputs.model || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5
+        shell: pwsh
+        run: ./tools/ci/install_mt5.ps1
+
+      - name: Compile EA (0 errors / 0 warnings)
+        shell: pwsh
+        run: ./tools/ci/compile.ps1
+
+      - name: Check secrets
+        id: secrets
+        shell: pwsh
+        run: |
+          if ($env:MT5_LOGIN -and $env:MT5_PASSWORD -and $env:MT5_SERVER) {
+            "ok=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "ok=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "### バックテストは未実行" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "シークレット MT5_LOGIN / MT5_PASSWORD / MT5_SERVER が未設定のため、コンパイルのみ行いました。" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          }
+
+      - name: Backtest
+        if: steps.secrets.outputs.ok == 'true'
+        shell: pwsh
+        run: ./tools/ci/backtest.ps1
+
+      - name: Summarize
+        if: always() && steps.secrets.outputs.ok == 'true'
+        shell: pwsh
+        run: |
+          python tools/summarize_report.py reports
+          if (Test-Path reports/summary.md) { Get-Content reports/summary.md -Encoding utf8 | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt5-backtest-reports
+          path: reports/
+          if-no-files-found: ignore
