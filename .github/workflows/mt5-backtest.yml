@@ -51,9 +51,10 @@ on:
       - "tools/ci/**"
       - ".github/workflows/mt5-backtest.yml"
 
+# プッシュ時は古い実行を止める。手動実行（workflow_dispatch）は並列に動かせる。
 concurrency:
-  group: mt5-backtest-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && format('mt5-push-{0}', github.ref) || format('mt5-dispatch-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   backtest:
