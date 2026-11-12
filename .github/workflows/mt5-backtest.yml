@@ -67,6 +67,8 @@ concurrency:
 jobs:
   backtest:
     runs-on: windows-latest
+    permissions:
+      contents: write   # 手動実行の結果（1行要約）を reports/runs/ にコミットするため
     timeout-minutes: 120
     env:
       MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
@@ -140,3 +142,31 @@ jobs:
         shell: pwsh
         run: |
           if (Test-Path reports/result_line.txt) { Get-Content reports/result_line.txt -Encoding utf8 } else { Write-Host "RESULT なし" }
+
+      # 手動実行の結果を1行要約としてリポジトリに保存する（多数の検証を比較しやすくするため）。
+      # reports/ は push トリガーの対象外なので、このコミットでワークフローは再実行されない。
+      - name: Save result line to repository
+        if: always() && github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/run_result.txt"
+          {
+            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} inputs=${BT_INPUTS:-default}"
+            cat reports/result_line.txt 2>/dev/null || echo "RESULT なし（テスト失敗）"
+          } > "$out"
+          cat "$out"
+          git reset -q --hard
+          git clean -qfd
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5 6 7 8; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard FETCH_HEAD
+            mkdir -p reports/runs
+            cp "$out" "reports/runs/$(printf '%04d' "$GITHUB_RUN_NUMBER").txt"
+            git add reports/runs
+            git commit -q -m "ci: result of run ${GITHUB_RUN_NUMBER} [skip ci]"
+            if git push -q origin HEAD:"$GITHUB_REF_NAME"; then echo "saved"; exit 0; fi
+            sleep $((RANDOM % 8 + 2))
+          done
+          echo "結果の保存に失敗しました（ログの RESULT 行を参照）"
