@@ -134,3 +134,9 @@ jobs:
           name: mt5-backtest-reports
           path: reports/
           if-no-files-found: ignore
+
+      - name: Result line
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path reports/result_line.txt) { Get-Content reports/result_line.txt -Encoding utf8 } else { Write-Host "RESULT なし" }

@@ -135,6 +135,32 @@ def main():
         "※ 過去の成績は将来の利益を保証しません。実運用の前に、必ずデモ口座で十分に検証してください。",
         "",
     ]
+    # ログの末尾で確認しやすいよう、主要な数値を1行にまとめる
+    try:
+        parts = []
+        m0 = dict(extract_metrics(table_cells(read_text(reports[0]))))
+        for key, label in (("総損益", "net"), ("プロフィットファクター", "pf"), ("取引数", "trades"),
+                           ("勝ちトレード（勝率）", "win"), ("相対ドローダウン（有効証拠金）", "dd")):
+            if key in m0:
+                parts.append(f"{label}={m0[key].replace(' ', '')}")
+        if os.path.exists(mp):
+            mr = [float(r["return_pct"]) for r in csv.DictReader(open(mp, encoding="utf-8"))]
+            if mr:
+                g = 1.0
+                for r in mr:
+                    g *= max(1.0 + r / 100.0, 0.0)
+                geo = (g ** (1.0 / len(mr)) - 1.0) * 100.0 if g > 0 else -100.0
+                parts.append(f"months={len(mr)} avg={sum(mr)/len(mr):+.2f}% geo={geo:+.2f}% min={min(mr):+.2f}% max={max(mr):+.2f}% ge10={sum(1 for r in mr if r >= 10)}")
+        if os.path.exists(bd):
+            br = list(csv.DictReader(open(bd, encoding="utf-8")))
+            for kind in ("symbol", "regime", "strategy", "cost"):
+                sub = [r for r in br if r.get("kind") == kind]
+                if sub:
+                    parts.append(kind + ":" + ",".join(f"{r['name']}({r['trades']})={float(r['profit']):+.0f}" for r in sub))
+        open(os.path.join(out_dir, "result_line.txt"), "w", encoding="utf-8").write("RESULT " + " | ".join(parts) + "\n")
+    except Exception as e:  # 1行要約は補助なので、失敗しても全体は止めない
+        print("result_line の作成に失敗:", e)
+
     path = os.path.join(out_dir, "summary.md")
     open(path, "w", encoding="utf-8").write("\n".join(lines))
     print("\n".join(lines))

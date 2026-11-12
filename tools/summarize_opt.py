@@ -108,6 +108,16 @@ def main():
                              f"{num(b.get('Profit')):,.0f} | {b.get('Profit Factor')} | {vals} |")
     lines += ["", "※ 過去の成績は将来の利益を保証しません。", ""]
 
+    # ログの末尾で確認しやすいよう、上位の候補を短い行にまとめる
+    rl = [f"RESULT opt passes={len(back)} fwd={len(fwd)} candidates={len(candidates)}"]
+    for i, (p_, b, f) in enumerate(candidates[:12], 1):
+        vals = ";".join(f"{k}={b.get(k, '')}" for k in params)
+        rl.append(f"RESULT #{i} fwd_geo={num(f.get('Forward Result', f.get('Result'))):+.2f} fwd_net={num(f.get('Profit')):+.0f} "
+                  f"fwd_pf={num(f.get('Profit Factor')):.2f} fwd_tr={f.get('Trades')} fwd_dd={num(f.get('Equity DD %')):.1f} "
+                  f"back_geo={num(b.get('Result')):+.2f} back_net={num(b.get('Profit')):+.0f} back_pf={num(b.get('Profit Factor')):.2f} "
+                  f"back_tr={b.get('Trades')} back_dd={num(b.get('Equity DD %')):.1f} | {vals}")
+    open(os.path.join(out_dir, "result_line.txt"), "w", encoding="utf-8").write("\n".join(rl) + "\n")
+
     path = os.path.join(out_dir, "optimize_summary.md")
     open(path, "w", encoding="utf-8").write("\n".join(lines))
     print("\n".join(lines))
