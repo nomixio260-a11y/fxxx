@@ -50,8 +50,8 @@
 - **ロット**：有効証拠金の 1%（`InpRiskPercent`）を、SL に掛かったときの損失額とします。
   - 損失額は `OrderCalcProfit` で計算するので、円口座でも正しく計算されます。
   - ロットはブローカーの最小ロット・最大ロット・刻み幅に合わせて調整します。
-- **SL / TP**：SL = ATR×1.5、TP = ATR×3.0。
-- **建値ストップ**：含み益が ATR×1.0 に達したら、SL を建値＋0.5pips に移します。
+- **SL / TP**：SL = ATR×2.0、TP = ATR×2.0（最適化とフォワード検証の結果で決定。`reports/optimize_summary.md` 参照）。
+- **建値ストップ**：含み益が ATR×0.5 に達したら、SL を建値＋0.5pips に移します。
 - **トレーリング**：含み益が ATR×1.5 を超えたら、現在値から ATR×1.0 の位置で SL を追いかけます。
 - **1日の損失上限**：損失が 3% に達したら、その日は新規エントリーをしません。
 
@@ -177,7 +177,7 @@ bash tools/backtest.sh 2023.01.01 2025.12.31   # 期間を指定する場合
 | `InpTimeframe` | H1 | 判定に使う時間足 |
 | `InpEntryThreshold` | 0.45 | エントリーに必要なスコア |
 | `InpRiskPercent` | 1.0 | 1回の許容損失（%） |
-| `InpSLATR` / `InpTPATR` | 1.5 / 3.0 | SL/TP の ATR 倍率 |
+| `InpSLATR` / `InpTPATR` | 2.0 / 2.0 | SL/TP の ATR 倍率 |
 | `InpMaxDailyLossPct` | 3.0 | 1日の損失上限（%） |
 | `InpMaxSpreadPips` | 2.0 | 最大スプレッド |
 | `InpHighVolMode` | ロット半分 | 高ボラ時の扱い（停止 / ロット半分） |

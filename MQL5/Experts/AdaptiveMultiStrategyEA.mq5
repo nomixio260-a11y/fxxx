@@ -97,9 +97,9 @@ input int              InpMaxPositions      = 1;           // 最大ポジショ
 input group "=== 資金管理 ==="
 input double           InpRiskPercent       = 1.0;         // 1回の許容損失（有効証拠金の%）
 input bool             InpAllowMinLot       = false;       // 計算ロットが最小未満なら最小ロットで入る
-input double           InpSLATR             = 1.5;         // SL = ATR × この値
-input double           InpTPATR             = 3.0;         // TP = ATR × この値（0でTPなし）
-input double           InpBETriggerATR      = 1.0;         // 含み益が ATR×この値 で建値へ（0で無効）
+input double           InpSLATR             = 2.0;         // SL = ATR × この値
+input double           InpTPATR             = 2.0;         // TP = ATR × この値（0でTPなし）
+input double           InpBETriggerATR      = 0.5;         // 含み益が ATR×この値 で建値へ（0で無効）
 input double           InpBEOffsetPips      = 0.5;         // 建値ストップの上乗せ（pips）
 input double           InpTrailStartATR     = 1.5;         // 含み益が ATR×この値 でトレーリング開始
 input double           InpTrailDistATR      = 1.0;         // トレーリング幅 ATR×この値（0で無効）
