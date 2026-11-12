@@ -174,9 +174,17 @@ public:
    datetime          pendUntil;       // この時刻を過ぎたら古いシグナルとして捨てる
    datetime          lastEntryTry;
 
+   //--- 保留中の決済（日付の変わり目など、市場が閉じていて決済できないときに再試行する）
+   bool              pendCloseBuy;
+   bool              pendCloseSell;
+   string            pendCloseReason;
+   datetime          lastExitTry;
+
                      CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0),
                                            pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0),
-                                           pendUntil(0), lastEntryTry(0) {}
+                                           pendUntil(0), lastEntryTry(0),
+                                           pendCloseBuy(false), pendCloseSell(false), pendCloseReason(""),
+                                           lastExitTry(0) {}
 
    bool              Init(const string sym);
    void              Release(void) { regime.Release(); strategies.Release(); modules.Release(); }
@@ -189,6 +197,8 @@ private:
    void              OnBar(void);
    double            CalcScore(const ENUM_AMS_REGIME reg, const double &signals[], int &dominant);
    void              TryEnter(void);
+   void              TryClose(void);
+   void              RequestClose(const ENUM_POSITION_TYPE type, const string reason);
    bool              Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg, const string tag, const double riskMul);
   };
 
@@ -265,6 +275,8 @@ void CSymbolTrader::OnTick(void)
 
    if(IsNewBar())
       OnBar();
+   if(pendCloseBuy || pendCloseSell)
+      TryClose();
    if(pendDir != 0)
       TryEnter();
 
@@ -341,10 +353,9 @@ void CSymbolTrader::OnBar(void)
      {
       //--- 単独検証用の方式：ロジックごとの決済条件を先に確認する
       if(buys > 0 && modules.ExitSignal(POSITION_TYPE_BUY))
-         risk.CloseDirection(POSITION_TYPE_BUY, "ロジックの決済条件");
+         RequestClose(POSITION_TYPE_BUY, "ロジックの決済条件");
       if(sells > 0 && modules.ExitSignal(POSITION_TYPE_SELL))
-         risk.CloseDirection(POSITION_TYPE_SELL, "ロジックの決済条件");
-      risk.CountPositions(buys, sells);
+         RequestClose(POSITION_TYPE_SELL, "ロジックの決済条件");
       score     = modules.EntrySignal(signals[STRAT_MEANREV]);
       threshold = 0.5;
       tag       = EntryModeShortName(InpEntryMode);
@@ -361,9 +372,9 @@ void CSymbolTrader::OnBar(void)
    if(InpCloseOnOpposite)
      {
       if(score <= -threshold && buys > 0)
-         risk.CloseDirection(POSITION_TYPE_BUY, "逆シグナル");
+         RequestClose(POSITION_TYPE_BUY, "逆シグナル");
       if(score >= threshold && sells > 0)
-         risk.CloseDirection(POSITION_TYPE_SELL, "逆シグナル");
+         RequestClose(POSITION_TYPE_SELL, "逆シグナル");
      }
 
    //--- 新規エントリーのシグナルがあるか
@@ -404,6 +415,9 @@ void CSymbolTrader::TryEnter(void)
       pendDir = 0;
       return;
      }
+   //--- 決済待ちのポジションがあるあいだは、新規エントリーを待つ
+   if(pendCloseBuy || pendCloseSell)
+      return;
    int buys = 0, sells = 0;
    risk.CountPositions(buys, sells);
    if(buys + sells >= InpMaxPerSymbol || CountAllPositions() >= InpMaxPositions ||
@@ -443,6 +457,45 @@ void CSymbolTrader::TryEnter(void)
       if(InpEntryMode != ENTRY_WEIGHTED)
          modules.MarkEntered();
      }
+  }
+
+//+------------------------------------------------------------------+
+//| 決済を依頼する。実際の決済は TryClose が、できる状態になりしだい行う       |
+//+------------------------------------------------------------------+
+void CSymbolTrader::RequestClose(const ENUM_POSITION_TYPE type, const string reason)
+  {
+   if(type == POSITION_TYPE_BUY)
+      pendCloseBuy = true;
+   else
+      pendCloseSell = true;
+   pendCloseReason = reason;
+   lastExitTry     = 0;
+  }
+
+//+------------------------------------------------------------------+
+//| 保留中の決済を行う。                                                |
+//|  日足の変わり目（ロールオーバー）は数分間市場が閉じるので、               |
+//|  閉じているあいだは待ち、失敗したら10秒おきに再試行する。                 |
+//+------------------------------------------------------------------+
+void CSymbolTrader::TryClose(void)
+  {
+   int buys = 0, sells = 0;
+   risk.CountPositions(buys, sells);
+   if(buys == 0)
+      pendCloseBuy = false;
+   if(sells == 0)
+      pendCloseSell = false;
+   if(!pendCloseBuy && !pendCloseSell)
+      return;
+   if(SecondsToSessionEnd(symbol) < 0)          // 取引時間外
+      return;
+   if(TimeCurrent() - lastExitTry < 10)
+      return;
+   lastExitTry = TimeCurrent();
+   if(pendCloseBuy && risk.CloseDirection(POSITION_TYPE_BUY, pendCloseReason))
+      pendCloseBuy = false;
+   if(pendCloseSell && risk.CloseDirection(POSITION_TYPE_SELL, pendCloseReason))
+      pendCloseSell = false;
   }
 
 //+------------------------------------------------------------------+
