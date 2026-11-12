@@ -10,6 +10,12 @@ import os
 import re
 import sys
 
+# Windows のコンソールでも日本語を出力できるようにする
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 # (英語ラベル, 日本語ラベルの候補, 表示名)
 METRICS = [
     ("Total Net Profit", ("総損益", "純益"), "総損益"),

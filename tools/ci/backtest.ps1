@@ -73,6 +73,8 @@ try {
   $p = Start-Process -FilePath (Join-Path $dir 'terminal64.exe') -ArgumentList '/portable', "/config:`"$conf`"" -PassThru
   $timeoutMin = if ($env:BT_TIMEOUT_MIN) { [int]$env:BT_TIMEOUT_MIN } else { 25 }
   $noConn = 0
+  $authorized = $false
+  $startedAt = Get-Date
   $deadline = (Get-Date).AddMinutes($timeoutMin)
   # 実行中のログを30秒ごとに表示し、致命的なエラーが出たら早めに止める
   while (-not $p.WaitForExit(30000)) {
@@ -84,6 +86,10 @@ try {
     }
     $noConn += @($new | Where-Object { $_ -match 'no connection|server .* not found|common error|invalid server' }).Count
     if (-not $fatal -and $noConn -ge 5) { $fatal = @('接続エラーが繰り返し発生（サーバー名が見つからない可能性）') }
+    if ($new | Where-Object { $_ -match 'authorized on' }) { $authorized = $true }
+    if (-not $fatal -and -not $authorized -and ((Get-Date) - $startedAt).TotalMinutes -ge 6) {
+      $fatal = @('6分たっても口座にログインできていません（サーバー名が MT5 のサーバー一覧に無い可能性）')
+    }
     if ($fatal) {
       Save-Screen (Join-Path $out 'screen_at_error.png')
       Write-Host "エラーを検出したため停止します: $($fatal | Select-Object -First 1)"

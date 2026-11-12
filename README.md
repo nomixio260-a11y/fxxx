@@ -145,7 +145,9 @@ bash tools/backtest.sh 2023.01.01 2025.12.31   # 期間を指定する場合
 
 3. （任意）**Variables** タブで、次の変数を登録できます。
    - `MT5_SYMBOL`：銘柄名に接尾辞がある場合（例：`USDJPY.oj1m`）
-   - `MT5_INSTALLER_URL`：OANDA 版の MT5 インストーラーを使う場合
+   - `MT5_INSTALLER_URL`：別の MT5 インストーラーを使う場合
+     - 既定は OANDA 版（`oanda.corporation/mt5/oanda5setup.exe`）です。
+     - OANDA のサーバー一覧が入っているので、サーバー名でログインできます。
 
 ### 実行
 1. **Actions** タブで「MT5 Backtest」を選び、「**Run workflow**」を押します。
