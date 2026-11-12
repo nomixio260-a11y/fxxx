@@ -14,9 +14,9 @@ MQL5\Experts\AdaptiveMultiStrategyEA.mq5 : information: including MQL5\Include\A
 MQL5\Experts\AdaptiveMultiStrategyEA.mq5 : information: including MQL5\Include\AMS\RiskManager.mqh
 MQL5\Experts\AdaptiveMultiStrategyEA.mq5 : information: including MQL5\Include\AMS\TradeFilters.mqh
  : information: code generated
-Result: 0 errors, 0 warnings, 1515 ms elapsed, cpu='X64 Regular'
+Result: 0 errors, 0 warnings, 1812 ms elapsed, cpu='X64 Regular'
 
 
 MQL5\Scripts\AMS_ImportHistData.mq5 : information: compiling MQL5\Scripts\AMS_ImportHistData.mq5
  : information: code generated
-Result: 0 errors, 0 warnings, 433 ms elapsed, cpu='X64 Regular'
+Result: 0 errors, 0 warnings, 532 ms elapsed, cpu='X64 Regular'

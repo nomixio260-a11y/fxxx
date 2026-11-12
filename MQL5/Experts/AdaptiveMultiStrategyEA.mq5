@@ -109,6 +109,7 @@ input double           InpTrailDistATR      = 1.0;         // トレーリング
 input double           InpTrailStepPips     = 1.0;         // SLを動かす最小幅（pips）
 input double           InpMaxDailyLossPct   = 15.0;        // 1日の損失上限（%、0で無効）
 input double           InpMaxDDStopPct      = 50.0;        // 最高値からの下落がこの%を超えたら全決済して停止（0で無効）
+input double           InpMaxMarginUsePct   = 40.0;        // 必要証拠金の合計の上限（有効証拠金の%。強制ロスカット防止）
 
 input group "=== フィルター ==="
 input double           InpMaxSpreadATR      = 0.25;        // スプレッドが ATR×この値を超えたら見送り（0で無効）
@@ -127,6 +128,7 @@ input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）が
 CTrade g_trade;
 double g_weights[4][AMS_STRATEGY_COUNT];   // [REGIME][STRATEGY]
 double g_peakEquity = 0.0;
+bool   g_stopOut    = false;   // バックテスト中に強制ロスカットがあったか
 bool   g_halted     = false;
 
 int CountAllPositions(void);
@@ -170,7 +172,8 @@ bool CSymbolTrader::Init(const string sym)
                        InpMACDFast, InpMACDSlow, InpMACDSignal,
                        InpStochK, InpStochD, InpStochSlowing))
       return(false);
-   risk.Init(sym, InpMagic, GetPointer(g_trade), InpRiskPercent, InpMaxDailyLossPct, InpAllowMinLot);
+   risk.Init(sym, InpMagic, GetPointer(g_trade), InpRiskPercent, InpMaxDailyLossPct, InpAllowMinLot,
+             InpMaxMarginUsePct);
    return(true);
   }
 
@@ -390,6 +393,11 @@ bool ValidateInputs(void)
    if(InpEntryThreshold <= 0.0 || InpEntryThreshold > 1.0)
      {
       Print("[AMS] InpEntryThreshold は 0 より大きく 1 以下にしてください");
+      return(false);
+     }
+   if(InpMaxMarginUsePct <= 0.0 || InpMaxMarginUsePct > 90.0)
+     {
+      Print("[AMS] InpMaxMarginUsePct は 0 より大きく 90 以下にしてください");
       return(false);
      }
    if(InpMaxPositions < 1 || InpMaxPerSymbol < 1)
@@ -676,6 +684,7 @@ double MonthlyReturns(const bool output)
    if(months <= 0)
       return(0.0);
 
+   g_stopOut = false;
    double pnl[];
    ArrayResize(pnl, months);
    ArrayInitialize(pnl, 0.0);
@@ -687,6 +696,8 @@ double MonthlyReturns(const bool output)
       const ENUM_DEAL_TYPE type = (ENUM_DEAL_TYPE)HistoryDealGetInteger(deal, DEAL_TYPE);
       if(type != DEAL_TYPE_BUY && type != DEAL_TYPE_SELL)
          continue;
+      if((ENUM_DEAL_REASON)HistoryDealGetInteger(deal, DEAL_REASON) == DEAL_REASON_SO)
+         g_stopOut = true;
       MqlDateTime dt;
       TimeToStruct((datetime)HistoryDealGetInteger(deal, DEAL_TIME), dt);
       const int idx = (dt.year - d0.year) * 12 + (dt.mon - d0.mon);
@@ -751,6 +762,12 @@ double OnTester(void)
    const double geo    = MonthlyReturns(output);
    const double trades = TesterStatistics(STAT_TRADES);
    const double dd     = TesterStatistics(STAT_EQUITY_DDREL_PERCENT);
+   if(g_stopOut)
+     {
+      if(output)
+         Print("[AMS] 警告：強制ロスカット（ストップアウト）が発生しました。評価値は 0 にします");
+      return(0.0);
+     }
    if(trades < InpScoreMinTrades || dd > InpScoreMaxDD)
       return(0.0);
    return(geo);

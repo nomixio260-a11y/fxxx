@@ -23,6 +23,7 @@ private:
    double            m_riskPct;          // 1回の取引の許容損失（口座残高の%）
    double            m_maxDailyLossPct;  // 1日の損失上限（%）。0で無効
    bool              m_allowMinLot;      // 計算ロットが最小ロット未満でも最小ロットで入るか
+   double            m_maxMarginPct;     // 口座全体の必要証拠金の上限（有効証拠金の%）
    int               m_dayKey;           // 日付（YYYYMMDD）
    double            m_dayStartEquity;
 
@@ -33,7 +34,8 @@ public:
                      CRiskManager(void);
 
    void              Init(const string symbol, const ulong magic, CTrade *trade,
-                          const double riskPct, const double maxDailyLossPct, const bool allowMinLot);
+                          const double riskPct, const double maxDailyLossPct, const bool allowMinLot,
+                          const double maxMarginPct = 40.0);
 
    //--- 資金管理
    void              UpdateDay(void);
@@ -59,6 +61,7 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
                                    m_riskPct(1.0),
                                    m_maxDailyLossPct(3.0),
                                    m_allowMinLot(false),
+                                   m_maxMarginPct(40.0),
                                    m_dayKey(0),
                                    m_dayStartEquity(0.0)
   {
@@ -66,7 +69,8 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
 
 //+------------------------------------------------------------------+
 void CRiskManager::Init(const string symbol, const ulong magic, CTrade *trade,
-                        const double riskPct, const double maxDailyLossPct, const bool allowMinLot)
+                        const double riskPct, const double maxDailyLossPct, const bool allowMinLot,
+                        const double maxMarginPct)
   {
    m_symbol          = symbol;
    m_magic           = magic;
@@ -74,6 +78,7 @@ void CRiskManager::Init(const string symbol, const ulong magic, CTrade *trade,
    m_riskPct         = riskPct;
    m_maxDailyLossPct = maxDailyLossPct;
    m_allowMinLot     = allowMinLot;
+   m_maxMarginPct    = maxMarginPct;
    m_dayKey          = 0;
    UpdateDay();
   }
@@ -158,15 +163,20 @@ double CRiskManager::CalcLots(const ENUM_ORDER_TYPE type, const double entry, co
    if(lots <= 0.0)
       return(0.0);
 
-   //--- 証拠金が足りるか確認し、足りなければ減らす
+   //--- 証拠金の上限：口座全体の必要証拠金が「有効証拠金 × m_maxMarginPct%」を超えないようにする
+   //    （上限を設けないと、高リスク設定でロットが大きくなりすぎ、強制ロスカットになる）
    double margin = 0.0;
+   if(!OrderCalcMargin(type, m_symbol, lots, entry, margin) || margin <= 0.0)
+      return(lots);
+   const double used       = AccountInfoDouble(ACCOUNT_MARGIN);
    const double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-   if(OrderCalcMargin(type, m_symbol, lots, entry, margin) && margin > freeMargin * 0.9)
-     {
-      if(margin <= 0.0)
-         return(0.0);
-      lots = NormalizeVolume(lots * (freeMargin * 0.9) / margin);
-     }
+   double budget = equity * m_maxMarginPct / 100.0 - used;
+   if(budget > freeMargin * 0.5)
+      budget = freeMargin * 0.5;
+   if(budget <= 0.0)
+      return(0.0);
+   if(margin > budget)
+      lots = NormalizeVolume(lots * budget / margin);
    return(lots);
   }
 
