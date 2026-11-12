@@ -1,0 +1,10 @@
+# ログイン情報（絶対にコミットしない）
+tester/credentials.env
+*.ini.local
+
+# コンパイル結果・一時ファイル
+*.ex5
+*.log
+!reports/*.log
+*.tmp
+__pycache__/

@@ -1,0 +1,362 @@
+﻿//+------------------------------------------------------------------+
+//|                                              AMS/RiskManager.mqh |
+//|  資金管理とポジション管理                                           |
+//|   - 許容損失(%) と SL 幅からのロット計算（口座通貨に自動で対応）         |
+//|   - 1日の損失上限                                                  |
+//|   - 建値ストップ / トレーリングストップ                               |
+//+------------------------------------------------------------------+
+#ifndef AMS_RISKMANAGER_MQH
+#define AMS_RISKMANAGER_MQH
+
+#include <Trade\Trade.mqh>
+#include <Trade\PositionInfo.mqh>
+#include "Common.mqh"
+
+class CRiskManager
+  {
+private:
+   string            m_symbol;
+   ulong             m_magic;
+   CTrade           *m_trade;
+   CPositionInfo     m_pos;
+
+   double            m_riskPct;          // 1回の取引の許容損失（口座残高の%）
+   double            m_maxDailyLossPct;  // 1日の損失上限（%）。0で無効
+   bool              m_allowMinLot;      // 計算ロットが最小ロット未満でも最小ロットで入るか
+   int               m_dayKey;           // 日付（YYYYMMDD）
+   double            m_dayStartEquity;
+
+   int               DayKey(const datetime t) const;
+   double            MinStopDistance(void) const;
+
+public:
+                     CRiskManager(void);
+
+   void              Init(const string symbol, const ulong magic, CTrade *trade,
+                          const double riskPct, const double maxDailyLossPct, const bool allowMinLot);
+
+   //--- 資金管理
+   void              UpdateDay(void);
+   bool              DailyLossHit(void);
+   double            NormalizeVolume(const double lots) const;
+   double            CalcLots(const ENUM_ORDER_TYPE type, const double entry, const double sl,
+                              const double riskMultiplier);
+   bool              AdjustStops(const ENUM_ORDER_TYPE type, const double entry, double &sl, double &tp) const;
+
+   //--- ポジション管理
+   int               CountPositions(int &buys, int &sells);
+   bool              CloseAll(const string reason);
+   bool              CloseDirection(const ENUM_POSITION_TYPE type, const string reason);
+   void              ManageStops(const double atr, const double beTriggerAtr, const double beOffsetPips,
+                                 const double trailStartAtr, const double trailDistAtr,
+                                 const double trailStepPips);
+  };
+
+//+------------------------------------------------------------------+
+CRiskManager::CRiskManager(void) : m_symbol(""),
+                                   m_magic(0),
+                                   m_trade(NULL),
+                                   m_riskPct(1.0),
+                                   m_maxDailyLossPct(3.0),
+                                   m_allowMinLot(false),
+                                   m_dayKey(0),
+                                   m_dayStartEquity(0.0)
+  {
+  }
+
+//+------------------------------------------------------------------+
+void CRiskManager::Init(const string symbol, const ulong magic, CTrade *trade,
+                        const double riskPct, const double maxDailyLossPct, const bool allowMinLot)
+  {
+   m_symbol          = symbol;
+   m_magic           = magic;
+   m_trade           = trade;
+   m_riskPct         = riskPct;
+   m_maxDailyLossPct = maxDailyLossPct;
+   m_allowMinLot     = allowMinLot;
+   m_dayKey          = 0;
+   UpdateDay();
+  }
+
+//+------------------------------------------------------------------+
+int CRiskManager::DayKey(const datetime t) const
+  {
+   MqlDateTime dt;
+   TimeToStruct(t, dt);
+   return(dt.year * 10000 + dt.mon * 100 + dt.day);
+  }
+
+//+------------------------------------------------------------------+
+//| 日付が変わったら、その日の開始時の有効証拠金を記録する                  |
+//+------------------------------------------------------------------+
+void CRiskManager::UpdateDay(void)
+  {
+   const int key = DayKey(TimeCurrent());
+   if(key != m_dayKey)
+     {
+      m_dayKey         = key;
+      m_dayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+     }
+  }
+
+//+------------------------------------------------------------------+
+bool CRiskManager::DailyLossHit(void)
+  {
+   if(m_maxDailyLossPct <= 0.0 || m_dayStartEquity <= 0.0)
+      return(false);
+   const double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   return(equity <= m_dayStartEquity * (1.0 - m_maxDailyLossPct / 100.0));
+  }
+
+//+------------------------------------------------------------------+
+//| ロットを刻み幅に切り捨て、最小/最大の範囲に収める                       |
+//+------------------------------------------------------------------+
+double CRiskManager::NormalizeVolume(const double lots) const
+  {
+   const double minLot = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
+   const double maxLot = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MAX);
+   const double step   = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_STEP);
+   if(step <= 0.0)
+      return(0.0);
+
+   double v = MathFloor(lots / step + 1e-9) * step;
+   if(v < minLot)
+      v = m_allowMinLot ? minLot : 0.0;
+   if(v > maxLot)
+      v = maxLot;
+
+   const int volDigits = (int)MathMax(0.0, MathCeil(-MathLog10(step)));
+   return(NormalizeDouble(v, volDigits));
+  }
+
+//+------------------------------------------------------------------+
+//| 許容損失額 ÷ 1ロットあたりの損失額 でロットを決める                     |
+//| OrderCalcProfit を使うので、口座通貨が円でもドルでも正しく計算できる      |
+//+------------------------------------------------------------------+
+double CRiskManager::CalcLots(const ENUM_ORDER_TYPE type, const double entry, const double sl,
+                              const double riskMultiplier)
+  {
+   if(entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
+      return(0.0);
+
+   const double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
+   const double riskMoney = equity * m_riskPct / 100.0 * riskMultiplier;
+   if(riskMoney <= 0.0)
+      return(0.0);
+
+   double lossPerLot = 0.0;
+   if(!OrderCalcProfit(type, m_symbol, 1.0, entry, sl, lossPerLot))
+     {
+      PrintFormat("[AMS] OrderCalcProfit 失敗 (err=%d)", GetLastError());
+      return(0.0);
+     }
+   lossPerLot = MathAbs(lossPerLot);
+   if(lossPerLot <= 0.0)
+      return(0.0);
+
+   double lots = NormalizeVolume(riskMoney / lossPerLot);
+   if(lots <= 0.0)
+      return(0.0);
+
+   //--- 証拠金が足りるか確認し、足りなければ減らす
+   double margin = 0.0;
+   const double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   if(OrderCalcMargin(type, m_symbol, lots, entry, margin) && margin > freeMargin * 0.9)
+     {
+      if(margin <= 0.0)
+         return(0.0);
+      lots = NormalizeVolume(lots * (freeMargin * 0.9) / margin);
+     }
+   return(lots);
+  }
+
+//+------------------------------------------------------------------+
+//| ブローカーの最小ストップ距離（価格）                                  |
+//+------------------------------------------------------------------+
+double CRiskManager::MinStopDistance(void) const
+  {
+   const double point  = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+   const long   stops  = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   const long   freeze = SymbolInfoInteger(m_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   const long   level  = (stops > freeze) ? stops : freeze;
+   return((double)(level + 1) * point);
+  }
+
+//+------------------------------------------------------------------+
+//| SL/TP が最小ストップ距離より近ければ広げ、ティックサイズに丸める          |
+//+------------------------------------------------------------------+
+bool CRiskManager::AdjustStops(const ENUM_ORDER_TYPE type, const double entry, double &sl, double &tp) const
+  {
+   const double minDist = MinStopDistance();
+   if(type == ORDER_TYPE_BUY)
+     {
+      if(entry - sl < minDist)
+         sl = entry - minDist;
+      if(tp > 0.0 && tp - entry < minDist)
+         tp = entry + minDist;
+     }
+   else
+     {
+      if(sl - entry < minDist)
+         sl = entry + minDist;
+      if(tp > 0.0 && entry - tp < minDist)
+         tp = entry - minDist;
+     }
+   sl = NormalizePrice(m_symbol, sl);
+   tp = (tp > 0.0) ? NormalizePrice(m_symbol, tp) : 0.0;
+   return(sl > 0.0);
+  }
+
+//+------------------------------------------------------------------+
+int CRiskManager::CountPositions(int &buys, int &sells)
+  {
+   buys  = 0;
+   sells = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!m_pos.SelectByIndex(i))
+         continue;
+      if(m_pos.Symbol() != m_symbol || (ulong)m_pos.Magic() != m_magic)
+         continue;
+      if(m_pos.PositionType() == POSITION_TYPE_BUY)
+         buys++;
+      else
+         sells++;
+     }
+   return(buys + sells);
+  }
+
+//+------------------------------------------------------------------+
+bool CRiskManager::CloseAll(const string reason)
+  {
+   bool ok = true;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!m_pos.SelectByIndex(i))
+         continue;
+      if(m_pos.Symbol() != m_symbol || (ulong)m_pos.Magic() != m_magic)
+         continue;
+      const ulong ticket = m_pos.Ticket();
+      if(!m_trade.PositionClose(ticket))
+        {
+         PrintFormat("[AMS] 決済失敗 #%I64u (%s) retcode=%u %s", ticket, reason,
+                     m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+         ok = false;
+        }
+      else
+         PrintFormat("[AMS] 決済 #%I64u (%s)", ticket, reason);
+     }
+   return(ok);
+  }
+
+//+------------------------------------------------------------------+
+bool CRiskManager::CloseDirection(const ENUM_POSITION_TYPE type, const string reason)
+  {
+   bool ok = true;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!m_pos.SelectByIndex(i))
+         continue;
+      if(m_pos.Symbol() != m_symbol || (ulong)m_pos.Magic() != m_magic || m_pos.PositionType() != type)
+         continue;
+      const ulong ticket = m_pos.Ticket();
+      if(!m_trade.PositionClose(ticket))
+        {
+         PrintFormat("[AMS] 決済失敗 #%I64u (%s) retcode=%u %s", ticket, reason,
+                     m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+         ok = false;
+        }
+      else
+         PrintFormat("[AMS] 決済 #%I64u (%s)", ticket, reason);
+     }
+   return(ok);
+  }
+
+//+------------------------------------------------------------------+
+//| 建値ストップとトレーリングストップ                                     |
+//|  beTriggerAtr  : 含み益が ATR×この値 になったら SL を建値＋offset へ     |
+//|  trailStartAtr : 含み益が ATR×この値 を超えたらトレーリング開始          |
+//|  trailDistAtr  : 現在値から ATR×この値 離れた位置に SL を置く            |
+//|  trailStepPips : SL をこの pips 以上動かせるときだけ変更する             |
+//+------------------------------------------------------------------+
+void CRiskManager::ManageStops(const double atr, const double beTriggerAtr, const double beOffsetPips,
+                               const double trailStartAtr, const double trailDistAtr,
+                               const double trailStepPips)
+  {
+   if(atr <= 0.0)
+      return;
+
+   const double pip     = PipSize(m_symbol);
+   const double minDist = MinStopDistance();
+   const double step    = MathMax(trailStepPips * pip, SymbolInfoDouble(m_symbol, SYMBOL_POINT));
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!m_pos.SelectByIndex(i))
+         continue;
+      if(m_pos.Symbol() != m_symbol || (ulong)m_pos.Magic() != m_magic)
+         continue;
+
+      const ulong  ticket = m_pos.Ticket();
+      const double open   = m_pos.PriceOpen();
+      const double sl     = m_pos.StopLoss();
+      const double tp     = m_pos.TakeProfit();
+      double newSL = sl;
+
+      if(m_pos.PositionType() == POSITION_TYPE_BUY)
+        {
+         const double bid    = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+         const double profit = bid - open;
+         if(beTriggerAtr > 0.0 && profit >= atr * beTriggerAtr)
+           {
+            const double be = open + beOffsetPips * pip;
+            if(sl < be)
+               newSL = be;
+           }
+         if(trailDistAtr > 0.0 && profit >= atr * trailStartAtr)
+           {
+            const double trail = bid - atr * trailDistAtr;
+            if(trail > newSL)
+               newSL = trail;
+           }
+         newSL = NormalizePrice(m_symbol, newSL);
+         if(newSL > sl + step * 0.999 || (sl <= 0.0 && newSL > 0.0))
+           {
+            if(bid - newSL < minDist)
+               continue;
+            if(!m_trade.PositionModify(ticket, newSL, tp))
+               PrintFormat("[AMS] SL変更失敗 #%I64u retcode=%u %s", ticket,
+                           m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+           }
+        }
+      else
+        {
+         const double ask    = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+         const double profit = open - ask;
+         if(beTriggerAtr > 0.0 && profit >= atr * beTriggerAtr)
+           {
+            const double be = open - beOffsetPips * pip;
+            if(sl <= 0.0 || sl > be)
+               newSL = be;
+           }
+         if(trailDistAtr > 0.0 && profit >= atr * trailStartAtr)
+           {
+            const double trail = ask + atr * trailDistAtr;
+            if(newSL <= 0.0 || trail < newSL)
+               newSL = trail;
+           }
+         newSL = NormalizePrice(m_symbol, newSL);
+         if((sl > 0.0 && newSL > 0.0 && newSL < sl - step * 0.999) || (sl <= 0.0 && newSL > 0.0))
+           {
+            if(newSL - ask < minDist)
+               continue;
+            if(!m_trade.PositionModify(ticket, newSL, tp))
+               PrintFormat("[AMS] SL変更失敗 #%I64u retcode=%u %s", ticket,
+                           m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+           }
+        }
+     }
+  }
+
+#endif // AMS_RISKMANAGER_MQH
+//+------------------------------------------------------------------+
