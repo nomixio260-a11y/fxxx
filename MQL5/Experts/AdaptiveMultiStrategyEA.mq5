@@ -42,6 +42,11 @@ input double           InpPBRsiLow          = 40.0;        // [押し目] RSI �
 input double           InpPBRsiHigh         = 60.0;        // [押し目] RSI がこの値を下に抜けたら売り
 input int              InpPBEmaFast         = 50;          // [押し目] 日足EMA（短）
 input int              InpPBEmaSlow         = 200;         // [押し目] 日足EMA（長）
+input int              InpFixEntryHHMM      = 800;         // [東京仲値] エントリー時刻（東京時間。800 = 8:00）
+input int              InpFixExitHHMM       = 955;         // [東京仲値] 決済時刻（東京時間。955 = 9:55）
+input bool             InpFixGotobiOnly     = true;        // [東京仲値] ゴトー日（5・10日など）だけ取引する
+input int              InpFixDirection      = 1;           // [東京仲値] 1 = 買い / -1 = 売り
+input double           InpFixStopPips       = 30.0;        // [東京仲値] SL の幅（pips）
 
 input group "=== 相場状況（レジーム）判定 ==="
 input int              InpADXPeriod         = 14;          // ADX 期間
@@ -225,6 +230,7 @@ bool CSymbolTrader::Init(const string sym)
                        InpAsiaStartNY, InpLondonOpenNY, InpLBEntryEndNY, InpLBExitNY, InpAsiaMREndNY,
                        InpRSIPeriod, InpPBRsiLow, InpPBRsiHigh, InpPBEmaFast, InpPBEmaSlow))
          return(false);
+      modules.SetTokyoFix(InpFixEntryHHMM, InpFixExitHHMM, InpFixGotobiOnly, InpFixDirection);
       //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
       const int tod = modules.OpenTOD();
       if(tod >= 0)
@@ -519,9 +525,12 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
       if(!SymbolInfoTick(symbol, tick))
          return(false);
       const double entry = isBuy ? tick.ask : tick.bid;
-      double sl = isBuy ? entry - atr * InpSLATR : entry + atr * InpSLATR;
+      //--- 東京仲値は保有時間が短く決まっているので、SL は固定の pips、TP なし（時刻で決済）
+      const bool   fixMode = (InpEntryMode == ENTRY_TOKYO_FIX && InpFixStopPips > 0.0);
+      const double slDist  = fixMode ? InpFixStopPips * PipSize(symbol) : atr * InpSLATR;
+      double sl = isBuy ? entry - slDist : entry + slDist;
       double tp = 0.0;
-      if(InpTPATR > 0.0)
+      if(InpTPATR > 0.0 && !fixMode)
          tp = isBuy ? entry + atr * InpTPATR : entry - atr * InpTPATR;
       if(!risk.AdjustStops(type, entry, sl, tp))
          return(false);
