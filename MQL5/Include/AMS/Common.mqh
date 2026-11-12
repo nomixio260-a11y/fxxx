@@ -21,6 +21,16 @@ enum ENUM_AMS_HIGHVOL_MODE
    HIGHVOL_HALF  = 1     // ロット半分（中立の重みで判定）
   };
 
+//--- エントリーの方式
+enum ENUM_AMS_ENTRY_MODE
+  {
+   ENTRY_WEIGHTED    = 0,   // 4ロジックの重み付け（従来の方式）
+   ENTRY_DAILY_TREND = 1,   // 日足トレンドフォロー（高値/安値抜け）
+   ENTRY_LONDON_BO   = 2,   // ロンドン・ブレイクアウト
+   ENTRY_PULLBACK    = 3,   // 押し目買い/戻り売り
+   ENTRY_ASIA_MR     = 4    // アジア時間の逆張り
+  };
+
 //--- 売買ロジック
 #define AMS_STRATEGY_COUNT 4
 enum ENUM_AMS_STRATEGY
@@ -53,6 +63,19 @@ string StrategyShortName(const int strategy)
       case STRAT_MEANREV:  return("MR");
       case STRAT_MOMENTUM: return("MO");
       default:             return("--");
+     }
+  }
+
+//+------------------------------------------------------------------+
+string EntryModeShortName(const ENUM_AMS_ENTRY_MODE mode)
+  {
+   switch(mode)
+     {
+      case ENTRY_DAILY_TREND: return("DT");
+      case ENTRY_LONDON_BO:   return("LB");
+      case ENTRY_PULLBACK:    return("PB");
+      case ENTRY_ASIA_MR:     return("AM");
+      default:                return("W");
      }
   }
 

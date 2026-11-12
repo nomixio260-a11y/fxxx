@@ -16,6 +16,7 @@
 #include <AMS\Strategies.mqh>
 #include <AMS\RiskManager.mqh>
 #include <AMS\TradeFilters.mqh>
+#include <AMS\Modules.mqh>
 
 //==================================================================
 // 入力パラメータ
@@ -27,6 +28,20 @@ input ENUM_TIMEFRAMES  InpTimeframe         = PERIOD_H1;   // 判定に使う時
 input string           InpComment           = "AMS";       // 注文コメントの先頭
 input int              InpSlippagePoints    = 20;          // 許容スリッページ（point）
 input bool             InpVerbose           = false;       // 毎バーの判定内容をログに出す
+
+input group "=== エントリーの方式 ==="
+input ENUM_AMS_ENTRY_MODE InpEntryMode      = ENTRY_WEIGHTED; // エントリーの方式
+input int              InpDTEntryDays       = 55;          // [日足トレンド] この本数の高値/安値を抜けたら入る
+input int              InpDTExitDays        = 20;          // [日足トレンド] 反対側のこの本数の高値/安値で決済
+input int              InpAsiaStartNY       = 19;          // [時間帯] アジア時間の開始（ニューヨーク時間の時）
+input int              InpLondonOpenNY      = 3;           // [時間帯] ロンドン開始（ニューヨーク時間の時）
+input int              InpLBEntryEndNY      = 7;           // [ロンドンBO] エントリーを受け付ける終了時刻（NY時）
+input int              InpLBExitNY          = 12;          // [ロンドンBO] この時刻以降に決済（NY時）
+input int              InpAsiaMREndNY       = 1;           // [アジア逆張り] エントリーを受け付ける終了時刻（NY時）
+input double           InpPBRsiLow          = 40.0;        // [押し目] RSI がこの値を上に抜けたら買い
+input double           InpPBRsiHigh         = 60.0;        // [押し目] RSI がこの値を下に抜けたら売り
+input int              InpPBEmaFast         = 50;          // [押し目] 日足EMA（短）
+input int              InpPBEmaSlow         = 200;         // [押し目] 日足EMA（長）
 
 input group "=== 相場状況（レジーム）判定 ==="
 input int              InpADXPeriod         = 14;          // ADX 期間
@@ -146,14 +161,25 @@ public:
    CRegimeDetector   regime;
    CStrategySet      strategies;
    CRiskManager      risk;
+   CModuleSet        modules;         // 単独検証用のエントリー方式
    datetime          lastBar;
    double            lastATR;
    datetime          lastCloseTry;    // 決済を最後に試みた時刻（失敗時の連続リトライを抑える）
 
-                     CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0) {}
+   //--- 保留中のエントリー（スプレッド拡大など一時的な理由で入れないとき、少し待って再試行する）
+   int               pendDir;         // +1 買い / -1 売り / 0 なし
+   ENUM_AMS_REGIME   pendReg;
+   string            pendTag;
+   double            pendMul;
+   datetime          pendUntil;       // この時刻を過ぎたら古いシグナルとして捨てる
+   datetime          lastEntryTry;
+
+                     CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0),
+                                           pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0),
+                                           pendUntil(0), lastEntryTry(0) {}
 
    bool              Init(const string sym);
-   void              Release(void) { regime.Release(); strategies.Release(); }
+   void              Release(void) { regime.Release(); strategies.Release(); modules.Release(); }
    void              OnTick(void);
    void              CloseAll(const string reason) { g_trade.SetTypeFillingBySymbol(symbol); risk.CloseAll(reason); }
    bool              WeekendCloseTime(void);
@@ -162,7 +188,8 @@ private:
    bool              IsNewBar(void);
    void              OnBar(void);
    double            CalcScore(const ENUM_AMS_REGIME reg, const double &signals[], int &dominant);
-   bool              Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg, const int dominant, const double riskMul);
+   void              TryEnter(void);
+   bool              Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg, const string tag, const double riskMul);
   };
 
 //+------------------------------------------------------------------+
@@ -182,6 +209,13 @@ bool CSymbolTrader::Init(const string sym)
       return(false);
    risk.Init(sym, InpMagic, GetPointer(g_trade), InpRiskPercent, InpMaxDailyLossPct, InpAllowMinLot,
              InpMaxMarginUsePct);
+   if(InpEntryMode != ENTRY_WEIGHTED)
+     {
+      if(!modules.Init(sym, InpTimeframe, InpEntryMode, InpDTEntryDays, InpDTExitDays,
+                       InpAsiaStartNY, InpLondonOpenNY, InpLBEntryEndNY, InpLBExitNY, InpAsiaMREndNY,
+                       InpRSIPeriod, InpPBRsiLow, InpPBRsiHigh, InpPBEmaFast, InpPBEmaSlow))
+         return(false);
+     }
    //--- 起動した時点の足は処理済みとして扱う（EAの再起動直後に、足の途中で飛び乗らないため）
    lastBar = iTime(sym, InpTimeframe, 0);
    return(true);
@@ -225,6 +259,8 @@ void CSymbolTrader::OnTick(void)
 
    if(IsNewBar())
       OnBar();
+   if(pendDir != 0)
+      TryEnter();
 
    //--- 再起動直後など ATR が未取得のときは取得する（保有ポジションの建値/トレーリングを止めないため）
    if(lastATR <= 0.0)
@@ -272,6 +308,7 @@ double CSymbolTrader::CalcScore(const ENUM_AMS_REGIME reg, const double &signals
 void CSymbolTrader::OnBar(void)
   {
    risk.UpdateDay();
+   pendDir = 0;   // 前の足のシグナルは持ち越さない
 
    ENUM_AMS_REGIME reg = REGIME_NEUTRAL;
    if(!regime.Detect(reg))
@@ -282,8 +319,30 @@ void CSymbolTrader::OnBar(void)
    if(!strategies.Evaluate(signals))
       return;
 
-   int dominant = -1;
-   const double score = CalcScore(reg, signals, dominant);
+   int buys = 0, sells = 0;
+   risk.CountPositions(buys, sells);
+
+   double score     = 0.0;
+   double threshold = InpEntryThreshold;
+   string tag       = "";
+   if(InpEntryMode == ENTRY_WEIGHTED)
+     {
+      int dominant = -1;
+      score = CalcScore(reg, signals, dominant);
+      tag   = StrategyShortName(dominant);
+     }
+   else
+     {
+      //--- 単独検証用の方式：ロジックごとの決済条件を先に確認する
+      if(buys > 0 && modules.ExitSignal(POSITION_TYPE_BUY))
+         risk.CloseDirection(POSITION_TYPE_BUY, "ロジックの決済条件");
+      if(sells > 0 && modules.ExitSignal(POSITION_TYPE_SELL))
+         risk.CloseDirection(POSITION_TYPE_SELL, "ロジックの決済条件");
+      risk.CountPositions(buys, sells);
+      score     = modules.EntrySignal(signals[STRAT_MEANREV]);
+      threshold = 0.5;
+      tag       = EntryModeShortName(InpEntryMode);
+     }
 
    if(InpVerbose)
       PrintFormat("[AMS] %s %s regime=%s ADX=%.1f ATR%%=%.2f BW%%=%.2f | TF=%.1f BO=%.1f MR=%.1f MO=%.1f | score=%.2f",
@@ -293,56 +352,19 @@ void CSymbolTrader::OnBar(void)
                   signals[STRAT_MOMENTUM], score);
 
    //--- 逆方向のシグナルで決済
-   int buys = 0, sells = 0;
-   risk.CountPositions(buys, sells);
    if(InpCloseOnOpposite)
      {
-      if(score <= -InpEntryThreshold && buys > 0)
+      if(score <= -threshold && buys > 0)
          risk.CloseDirection(POSITION_TYPE_BUY, "逆シグナル");
-      if(score >= InpEntryThreshold && sells > 0)
+      if(score >= threshold && sells > 0)
          risk.CloseDirection(POSITION_TYPE_SELL, "逆シグナル");
-      risk.CountPositions(buys, sells);
      }
 
-   //--- 新規エントリーの条件
-   if(g_halted || MathAbs(score) < InpEntryThreshold)
+   //--- 新規エントリーのシグナルがあるか
+   if(g_halted || MathAbs(score) < threshold)
       return;
-   if(reg == REGIME_NEUTRAL && !InpTradeNeutral)
+   if(InpEntryMode == ENTRY_WEIGHTED && reg == REGIME_NEUTRAL && !InpTradeNeutral)
       return;
-   if(WeekendCloseTime() || IsMondayOpenGap(InpMondayStartHour))
-      return;
-   if(!WithinTradingHours(InpStartHour, InpEndHour))
-      return;
-   //--- 足の確定からの遅れが大きいとき（ティックが来なかった等）は、古いシグナルで入らない
-   if(TimeCurrent() - iTime(symbol, InpTimeframe, 0) > PeriodSeconds(InpTimeframe) / 4)
-      return;
-   //--- 実際に注文できる状態か（接続・取引許可・取引時間・価格の鮮度）
-   string why = "";
-   if(!CanTradeNow(symbol, why))
-     {
-      if(InpVerbose)
-         PrintFormat("[AMS] %s 見送り：%s", symbol, why);
-      return;
-     }
-   //--- 取引開始直後・終了直前（ロールオーバー前後）はスプレッドが広がりやすいので見送る
-   if(InpSessionEdgeMin > 0)
-     {
-      const int toEnd = SecondsToSessionEnd(symbol), fromStart = SecondsFromSessionStart(symbol);
-      if(toEnd < InpSessionEdgeMin * 60 || fromStart < InpSessionEdgeMin * 60)
-         return;
-     }
-   if(risk.DailyLossHit())
-      return;
-   if(InpMaxSpreadATR > 0.0 && lastATR > 0.0)
-     {
-      const double spread = SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID);
-      if(spread > lastATR * InpMaxSpreadATR)
-        {
-         if(InpVerbose)
-            PrintFormat("[AMS] %s スプレッドが広いため見送り", symbol);
-         return;
-        }
-     }
 
    double riskMul = 1.0;
    if(reg == REGIME_HIGHVOL)
@@ -352,19 +374,74 @@ void CSymbolTrader::OnBar(void)
       riskMul = 0.5;
      }
 
-   if(buys + sells >= InpMaxPerSymbol || CountAllPositions() >= InpMaxPositions)
-      return;
-   if(score > 0.0 && buys > 0)
-      return;
-   if(score < 0.0 && sells > 0)
-      return;
+   //--- シグナルを保留にして、入れる状態になりしだい注文する。
+   //    足の確定から「足の長さの1/4」を過ぎたら、古いシグナルとして捨てる。
+   pendDir   = (score > 0.0) ? 1 : -1;
+   pendReg   = reg;
+   pendTag   = tag;
+   pendMul   = riskMul;
+   pendUntil = iTime(symbol, InpTimeframe, 0) + PeriodSeconds(InpTimeframe) / 4;
+  }
 
-   Open(score > 0.0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, reg, dominant, riskMul);
+//+------------------------------------------------------------------+
+//| 保留中のシグナルで注文を試みる                                        |
+//|  - もう入るべきでない条件（期限切れ・週末前・上限超過など）なら捨てる      |
+//|  - 一時的な条件（スプレッド拡大・取引開始直後・接続切れ）なら待つ          |
+//+------------------------------------------------------------------+
+void CSymbolTrader::TryEnter(void)
+  {
+   if(pendDir == 0)
+      return;
+   if(g_halted || TimeCurrent() > pendUntil || WeekendCloseTime() ||
+      !WithinTradingHours(InpStartHour, InpEndHour) || risk.DailyLossHit())
+     {
+      pendDir = 0;
+      return;
+     }
+   int buys = 0, sells = 0;
+   risk.CountPositions(buys, sells);
+   if(buys + sells >= InpMaxPerSymbol || CountAllPositions() >= InpMaxPositions ||
+      (pendDir > 0 && buys > 0) || (pendDir < 0 && sells > 0))
+     {
+      pendDir = 0;
+      return;
+     }
+
+   //--- ここから下は一時的な条件。満たされるまで待つ
+   if(IsMondayOpenGap(InpMondayStartHour))
+      return;
+   string why = "";
+   if(!CanTradeNow(symbol, why))
+      return;
+   //--- 取引開始直後・終了直前（ロールオーバー前後）はスプレッドが広がりやすい
+   if(InpSessionEdgeMin > 0)
+     {
+      const int toEnd = SecondsToSessionEnd(symbol), fromStart = SecondsFromSessionStart(symbol);
+      if(toEnd < InpSessionEdgeMin * 60 || fromStart < InpSessionEdgeMin * 60)
+         return;
+     }
+   if(InpMaxSpreadATR > 0.0 && lastATR > 0.0)
+     {
+      const double spread = SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID);
+      if(spread > lastATR * InpMaxSpreadATR)
+         return;
+     }
+   if(TimeCurrent() - lastEntryTry < 5)
+      return;
+   lastEntryTry = TimeCurrent();
+
+   const int dir = pendDir;
+   pendDir = 0;   // 注文は1回だけ試みる（Open の中で、一時的なエラーには再試行する）
+   if(Open(dir > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, pendReg, pendTag, pendMul))
+     {
+      if(InpEntryMode != ENTRY_WEIGHTED)
+         modules.MarkEntered();
+     }
   }
 
 //+------------------------------------------------------------------+
 bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
-                         const int dominant, const double riskMul)
+                         const string tag, const double riskMul)
   {
    const double atr = lastATR;
    if(atr <= 0.0)
@@ -372,7 +449,7 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
 
    const int    digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
    const bool   isBuy  = (type == ORDER_TYPE_BUY);
-   const string comment = StringFormat("%s|%s|%s|%s", InpComment, symbol, RegimeShortName(reg), StrategyShortName(dominant));
+   const string comment = StringFormat("%s|%s|%s|%s", InpComment, symbol, RegimeShortName(reg), tag);
    g_trade.SetTypeFillingBySymbol(symbol);
 
    //--- リクオートなどの一時的なエラーは、価格を取り直して再試行する
@@ -605,6 +682,7 @@ int OnInit(void)
       if(InpUseTimer)
          EventSetTimer(2);
      }
+   PrintFormat("[AMS] エントリーの方式: %s", EnumToString(InpEntryMode));
    PrintFormat("[AMS] 開始 %d 銘柄 %s リスク %.1f%% 口座=%s レバレッジ=1:%d ストップアウト=%.0f%s",
                ArraySize(g_traders), EnumToString(InpTimeframe), InpRiskPercent,
                AccountInfoString(ACCOUNT_CURRENCY), (int)AccountInfoInteger(ACCOUNT_LEVERAGE),

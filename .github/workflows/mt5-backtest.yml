@@ -30,7 +30,7 @@ on:
         required: false
         default: "1"
       period:
-        description: "時間足 (M15 / M30 / H1 / H4)"
+        description: "時間足 (M15 / M30 / H1 / H4 / D1)"
         required: false
         default: "H1"
       symbols:
