@@ -47,6 +47,7 @@ input int              InpFixExitHHMM       = 955;         // [東京仲値] 決
 input bool             InpFixGotobiOnly     = true;        // [東京仲値] ゴトー日（5・10日など）だけ取引する
 input int              InpFixDirection      = 1;           // [東京仲値] 1 = 買い / -1 = 売り
 input double           InpFixStopPips       = 30.0;        // [東京仲値] SL の幅（pips）
+input double           InpFixMaxSpreadPips  = 1.5;         // [東京仲値] スプレッドがこの pips を超えていたら待つ
 
 input group "=== 相場状況（レジーム）判定 ==="
 input int              InpADXPeriod         = 14;          // ADX 期間
@@ -234,7 +235,8 @@ bool CSymbolTrader::Init(const string sym)
       //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
       const int tod = modules.OpenTOD();
       if(tod >= 0)
-         PrintFormat("[AMS] %s 週明けの最初の足=サーバー時間 %02d:%02d（NY 17:00 として扱う）", sym, tod / 3600, (tod % 3600) / 60);
+         PrintFormat("[AMS] %s 週明けの最初の足=サーバー時間 %02d:%02d（NY 17:00 として扱う） いまの東京時間=%s",
+                     sym, tod / 3600, (tod % 3600) / 60, TimeToString(modules.TokyoTime(TimeCurrent())));
       else
          PrintFormat("[AMS] %s 週明けの最初の足を特定できません（時間帯を使うロジックは動きません）", sym);
      }
@@ -446,12 +448,16 @@ void CSymbolTrader::TryEnter(void)
       if(toEnd < InpSessionEdgeMin * 60 || fromStart < InpSessionEdgeMin * 60)
          return;
      }
-   if(InpMaxSpreadATR > 0.0 && lastATR > 0.0)
+   const double spread = SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID);
+   if(InpEntryMode == ENTRY_TOKYO_FIX)
      {
-      const double spread = SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID);
-      if(spread > lastATR * InpMaxSpreadATR)
+      //--- 短い時間足の ATR は小さすぎて基準にならないので、pips で上限を決める
+      if(InpFixMaxSpreadPips > 0.0 && spread > InpFixMaxSpreadPips * PipSize(symbol))
          return;
      }
+   else
+      if(InpMaxSpreadATR > 0.0 && lastATR > 0.0 && spread > lastATR * InpMaxSpreadATR)
+         return;
    if(TimeCurrent() - lastEntryTry < 5)
       return;
    lastEntryTry = TimeCurrent();

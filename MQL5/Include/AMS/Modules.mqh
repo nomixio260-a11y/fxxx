@@ -394,13 +394,14 @@ bool CModuleSet::IsUSDST(const datetime t) const
 
 //+------------------------------------------------------------------+
 //| サーバー時間を東京時間に直す。                                        |
-//|  週明けの最初の足（NY 17:00）は、UTC では冬 22:00 / 夏 21:00。           |
+//|  週明けの最初の足（NY 17:00）は、UTC では「前日の」冬 22:00 / 夏 21:00。   |
 //|  東京は UTC+9（夏時間なし）。                                         |
+//|  例）サーバー 0:00 が NY 17:00 の場合、東京はサーバー +7時間（夏は +6時間） |
 //+------------------------------------------------------------------+
 datetime CModuleSet::TokyoTime(const datetime serverTime) const
   {
    const int nyCloseUTC = IsUSDST(serverTime) ? 21 : 22;
-   return((datetime)((long)serverTime - m_openTOD + (nyCloseUTC + 9) * 3600));
+   return((datetime)((long)serverTime - m_openTOD + (nyCloseUTC + 9 - 24) * 3600));
   }
 
 //+------------------------------------------------------------------+
