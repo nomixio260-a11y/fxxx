@@ -1,0 +1,2 @@
+run=79 mode=backtest period=M5 model=1 exec=default from=2015.01.01 to=2021.12.31 symbols=USDJPY inputs=InpEntryMode=5;InpRiskPercent=1;InpBETriggerATR=0;InpTrailDistATR=0;InpMaxDDStopPct=0;InpFixGotobiOnly=false
+RESULT net=-169583 | pf=0.85 | trades=639 | win=323(50.55%) | dd=24%(247541) | months=84 avg=-0.21% geo=-0.22% min=-3.45% max=+3.17% ge10=0 | symbol:USDJPY(639)=-169583 | regime:TREND(221)=-46553,RANGE(139)=-62678,NEUT(252)=-77833,HVOL(27)=+17481 | strategy:TFX(639)=-169583 | cost:+0.0pips(0)=-169583,+0.5pips(0)=-254528,+1.0pips(0)=-339473,+2.0pips(0)=-509363
