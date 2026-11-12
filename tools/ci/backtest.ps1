@@ -12,6 +12,10 @@ $to     = if ($env:BT_TO)     { $env:BT_TO }     else { (Get-Date).ToString('yyy
 $model  = if ($env:BT_MODEL)  { $env:BT_MODEL }  else { '1' }
 $mode   = if ($env:BT_MODE)   { $env:BT_MODE }   else { 'backtest' }
 $period = if ($env:BT_PERIOD) { $env:BT_PERIOD } else { 'H1' }
+# 約定の遅れ：-1=ランダムな遅延（実運用に近い）、0=遅延なし、正の数=ミリ秒。
+# 既定は、通常のバックテストがランダム遅延、最適化は遅延なし（速度と再現性のため）
+$execMode = if ($env:BT_EXECUTION) { $env:BT_EXECUTION } elseif ($mode -eq 'optimize') { '0' } else { '-1' }
+$deposit  = if ($env:BT_DEPOSIT) { $env:BT_DEPOSIT } else { '1000000' }
 $tfValue = @{ 'M5' = 5; 'M15' = 15; 'M30' = 30; 'H1' = 16385; 'H2' = 16386; 'H4' = 16388 }[$period]
 if (-not $tfValue) { throw "未対応の時間足: $period" }
 $reportName = "AMS_$($symbol -replace '[^A-Za-z0-9]', '_')_$period"
@@ -56,10 +60,10 @@ Model=$model
 $optLines
 FromDate=$from
 ToDate=$to
-Deposit=1000000
+Deposit=$deposit
 Currency=JPY
 Leverage=1:25
-ExecutionMode=0
+ExecutionMode=$execMode
 Visual=0
 Report=reports\$reportName
 ReplaceReport=1
@@ -69,7 +73,7 @@ $testerInputs
 $conf = Join-Path $dir 'ams_tester.ini'
 $ini | Out-File -FilePath $conf -Encoding ascii
 
-Write-Host "Backtest: $symbol H1 $from - $to (mode=$mode, model=$model, server=$($env:MT5_SERVER))"
+Write-Host "Backtest: $symbol H1 $from - $to (mode=$mode, model=$model, execution=$execMode, deposit=$deposit, server=$($env:MT5_SERVER))"
 # ログファイルの新しい行だけを表示する（MT5 のログは UTF-16）
 $script:shown = @{}
 function Show-NewLines([string]$pattern, [string]$tag) {

@@ -106,6 +106,13 @@ def main():
             lines += [f"## {title}", "", "| 名前 | 取引数 | 勝ち | 勝率(%) | 損益 |", "|---|---|---|---|---|"]
             lines += [f"| {r['name']} | {r['trades']} | {r['wins']} | {r['win_rate']} | {r['profit']} |" for r in sub]
             lines.append("")
+        cost = [r for r in rows if r.get("kind") == "cost"]
+        if cost:
+            lines += ["## 約定が不利にずれた場合の試算", "",
+                      "全取引で、1取引あたり下の pips だけ不利に約定したと仮定した総損益です（スリッページ・スプレッド拡大の影響の目安）。", "",
+                      "| 追加コスト | 総損益 |", "|---|---|"]
+            lines += [f"| {r['name']} | {float(r['profit']):,.0f} |" for r in cost]
+            lines.append("")
 
     mp = os.path.join(out_dir, "AMS_monthly.csv")
     if os.path.exists(mp):

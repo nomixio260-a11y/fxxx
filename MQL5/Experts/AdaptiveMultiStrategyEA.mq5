@@ -115,8 +115,14 @@ input group "=== フィルター ==="
 input double           InpMaxSpreadATR      = 0.25;        // スプレッドが ATR×この値を超えたら見送り（0で無効）
 input int              InpStartHour         = 0;           // 取引開始（サーバー時間）
 input int              InpEndHour           = 0;           // 取引終了（開始と同じなら終日）
-input int              InpFridayCloseHour   = 22;          // 金曜この時刻以降は全決済（-1で無効）
+input int              InpFridayCloseMin    = 120;         // 金曜の取引終了の何分前に全決済するか（セッション情報から判定。0で無効）
+input int              InpFridayCloseHour   = 22;          // 金曜この時刻以降は全決済（セッション情報が無いときの予備。-1で無効）
 input int              InpMondayStartHour   = 2;           // 月曜この時刻までは新規なし（0で無効）
+input int              InpSessionEdgeMin    = 15;          // 取引開始直後・終了直前のこの分数は新規なし（ロールオーバー時のスプレッド拡大を避ける。0で無効）
+
+input group "=== 実運用向け ==="
+input int              InpOrderRetries      = 3;           // 注文が一時的なエラーで失敗したときの再試行回数
+input bool             InpUseTimer          = true;        // 実運用時、タイマーでも全銘柄を処理する（チャート銘柄のティックが止まっても動く）
 
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
@@ -142,13 +148,15 @@ public:
    CRiskManager      risk;
    datetime          lastBar;
    double            lastATR;
+   datetime          lastCloseTry;    // 決済を最後に試みた時刻（失敗時の連続リトライを抑える）
 
-                     CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0) {}
+                     CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0) {}
 
    bool              Init(const string sym);
    void              Release(void) { regime.Release(); strategies.Release(); }
    void              OnTick(void);
    void              CloseAll(const string reason) { g_trade.SetTypeFillingBySymbol(symbol); risk.CloseAll(reason); }
+   bool              WeekendCloseTime(void);
 
 private:
    bool              IsNewBar(void);
@@ -174,7 +182,19 @@ bool CSymbolTrader::Init(const string sym)
       return(false);
    risk.Init(sym, InpMagic, GetPointer(g_trade), InpRiskPercent, InpMaxDailyLossPct, InpAllowMinLot,
              InpMaxMarginUsePct);
+   //--- 起動した時点の足は処理済みとして扱う（EAの再起動直後に、足の途中で飛び乗らないため）
+   lastBar = iTime(sym, InpTimeframe, 0);
    return(true);
+  }
+
+//+------------------------------------------------------------------+
+//| 週末前の決済時刻か。銘柄のセッション情報を優先し、無ければ時刻指定を使う   |
+//+------------------------------------------------------------------+
+bool CSymbolTrader::WeekendCloseTime(void)
+  {
+   if(IsBeforeWeekendClose(symbol, InpFridayCloseMin))
+      return(true);
+   return(IsFridayCloseTime(InpFridayCloseHour));
   }
 
 //+------------------------------------------------------------------+
@@ -192,16 +212,27 @@ void CSymbolTrader::OnTick(void)
   {
    g_trade.SetTypeFillingBySymbol(symbol);
 
-   //--- 週末前は全決済
-   if(IsFridayCloseTime(InpFridayCloseHour))
+   //--- 週末前は全決済（失敗した場合は10秒おきに再試行）
+   if(WeekendCloseTime() && TimeCurrent() - lastCloseTry >= 10)
      {
       int b = 0, s = 0;
       if(risk.CountPositions(b, s) > 0)
-         risk.CloseAll("金曜クローズ");
+        {
+         lastCloseTry = TimeCurrent();
+         risk.CloseAll("週末前クローズ");
+        }
      }
 
    if(IsNewBar())
       OnBar();
+
+   //--- 再起動直後など ATR が未取得のときは取得する（保有ポジションの建値/トレーリングを止めないため）
+   if(lastATR <= 0.0)
+     {
+      ENUM_AMS_REGIME tmp = REGIME_NEUTRAL;
+      if(regime.Detect(tmp))
+         lastATR = regime.ATR();
+     }
 
    risk.ManageStops(lastATR, InpBETriggerATR, InpBEOffsetPips,
                     InpTrailStartATR, InpTrailDistATR, InpTrailStepPips);
@@ -278,10 +309,28 @@ void CSymbolTrader::OnBar(void)
       return;
    if(reg == REGIME_NEUTRAL && !InpTradeNeutral)
       return;
-   if(IsFridayCloseTime(InpFridayCloseHour) || IsMondayOpenGap(InpMondayStartHour))
+   if(WeekendCloseTime() || IsMondayOpenGap(InpMondayStartHour))
       return;
    if(!WithinTradingHours(InpStartHour, InpEndHour))
       return;
+   //--- 足の確定からの遅れが大きいとき（ティックが来なかった等）は、古いシグナルで入らない
+   if(TimeCurrent() - iTime(symbol, InpTimeframe, 0) > PeriodSeconds(InpTimeframe) / 4)
+      return;
+   //--- 実際に注文できる状態か（接続・取引許可・取引時間・価格の鮮度）
+   string why = "";
+   if(!CanTradeNow(symbol, why))
+     {
+      if(InpVerbose)
+         PrintFormat("[AMS] %s 見送り：%s", symbol, why);
+      return;
+     }
+   //--- 取引開始直後・終了直前（ロールオーバー前後）はスプレッドが広がりやすいので見送る
+   if(InpSessionEdgeMin > 0)
+     {
+      const int toEnd = SecondsToSessionEnd(symbol), fromStart = SecondsFromSessionStart(symbol);
+      if(toEnd < InpSessionEdgeMin * 60 || fromStart < InpSessionEdgeMin * 60)
+         return;
+     }
    if(risk.DailyLossHit())
       return;
    if(InpMaxSpreadATR > 0.0 && lastATR > 0.0)
@@ -323,38 +372,57 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
 
    const int    digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
    const bool   isBuy  = (type == ORDER_TYPE_BUY);
-   const double entry  = isBuy ? SymbolInfoDouble(symbol, SYMBOL_ASK) : SymbolInfoDouble(symbol, SYMBOL_BID);
-   double sl = isBuy ? entry - atr * InpSLATR : entry + atr * InpSLATR;
-   double tp = 0.0;
-   if(InpTPATR > 0.0)
-      tp = isBuy ? entry + atr * InpTPATR : entry - atr * InpTPATR;
-
-   if(!risk.AdjustStops(type, entry, sl, tp))
-      return(false);
-
-   const double lots = risk.CalcLots(type, entry, sl, riskMul);
-   if(lots <= 0.0)
-     {
-      if(InpVerbose)
-         PrintFormat("[AMS] %s ロットが最小ロット未満（または証拠金不足）のため見送り", symbol);
-      return(false);
-     }
-
    const string comment = StringFormat("%s|%s|%s|%s", InpComment, symbol, RegimeShortName(reg), StrategyShortName(dominant));
    g_trade.SetTypeFillingBySymbol(symbol);
-   const bool sent = isBuy ? g_trade.Buy(lots, symbol, entry, sl, tp, comment)
-                           : g_trade.Sell(lots, symbol, entry, sl, tp, comment);
-   const uint rc = g_trade.ResultRetcode();
-   if(!sent || (rc != TRADE_RETCODE_DONE && rc != TRADE_RETCODE_PLACED && rc != TRADE_RETCODE_DONE_PARTIAL))
+
+   //--- リクオートなどの一時的なエラーは、価格を取り直して再試行する
+   const int attempts = MathMax(InpOrderRetries, 0) + 1;
+   for(int a = 0; a < attempts; a++)
      {
-      PrintFormat("[AMS] 注文失敗 %s %s %.2f lot retcode=%u %s", symbol, isBuy ? "BUY" : "SELL", lots,
-                  rc, g_trade.ResultRetcodeDescription());
-      return(false);
+      MqlTick tick;
+      if(!SymbolInfoTick(symbol, tick))
+         return(false);
+      const double entry = isBuy ? tick.ask : tick.bid;
+      double sl = isBuy ? entry - atr * InpSLATR : entry + atr * InpSLATR;
+      double tp = 0.0;
+      if(InpTPATR > 0.0)
+         tp = isBuy ? entry + atr * InpTPATR : entry - atr * InpTPATR;
+      if(!risk.AdjustStops(type, entry, sl, tp))
+         return(false);
+
+      const double lots = risk.CalcLots(type, entry, sl, riskMul);
+      if(lots <= 0.0)
+        {
+         if(InpVerbose)
+            PrintFormat("[AMS] %s ロットが最小ロット未満（または証拠金不足）のため見送り", symbol);
+         return(false);
+        }
+
+      const bool sent = isBuy ? g_trade.Buy(lots, symbol, entry, sl, tp, comment)
+                              : g_trade.Sell(lots, symbol, entry, sl, tp, comment);
+      const uint rc = g_trade.ResultRetcode();
+      if(sent && (rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL))
+        {
+         //--- 実際の約定価格と、注文時の価格とのずれ（スリッページ）を記録する
+         const double fill = g_trade.ResultPrice();
+         const double slip = (fill > 0.0) ? (isBuy ? fill - entry : entry - fill) / PipSize(symbol) : 0.0;
+         PrintFormat("[AMS] %s %s %.2f lot @%s SL=%s TP=%s ずれ=%+.1fpips [%s]", symbol, isBuy ? "BUY" : "SELL", lots,
+                     DoubleToString(fill > 0.0 ? fill : entry, digits), DoubleToString(sl, digits),
+                     DoubleToString(tp, digits), slip, comment);
+         return(true);
+        }
+
+      const bool transient = (rc == TRADE_RETCODE_REQUOTE || rc == TRADE_RETCODE_PRICE_CHANGED ||
+                              rc == TRADE_RETCODE_PRICE_OFF || rc == TRADE_RETCODE_TIMEOUT ||
+                              rc == TRADE_RETCODE_CONNECTION || rc == TRADE_RETCODE_TOO_MANY_REQUESTS);
+      PrintFormat("[AMS] 注文失敗 %s %s %.2f lot retcode=%u %s（%d/%d 回目）", symbol, isBuy ? "BUY" : "SELL", lots,
+                  rc, g_trade.ResultRetcodeDescription(), a + 1, attempts);
+      if(!transient)
+         return(false);
+      if(!MQLInfoInteger(MQL_TESTER))
+         Sleep(500);
      }
-   PrintFormat("[AMS] %s %s %.2f lot @%s SL=%s TP=%s [%s]", symbol, isBuy ? "BUY" : "SELL", lots,
-               DoubleToString(entry, digits), DoubleToString(sl, digits),
-               DoubleToString(tp, digits), comment);
-   return(true);
+   return(false);
   }
 
 //==================================================================
@@ -523,13 +591,32 @@ int OnInit(void)
      }
    g_peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
    g_halted     = false;
-   PrintFormat("[AMS] 開始 %d 銘柄 %s リスク %.1f%%", ArraySize(g_traders), EnumToString(InpTimeframe), InpRiskPercent);
+   //--- 実運用では、最高値と停止状態をターミナルに保存しておく（EAやPCを再起動しても引き継ぐ）
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      if(GlobalVariableCheck(GVName("peak")))
+         g_peakEquity = MathMax(g_peakEquity, GlobalVariableGet(GVName("peak")));
+      if(GlobalVariableCheck(GVName("halted")) && GlobalVariableGet(GVName("halted")) > 0.5)
+        {
+         g_halted = true;
+         Print("[AMS] 注意：前回、ドローダウン上限で停止しています。再開するには、MT5 の「ツール → グローバル変数」で ",
+               GVName("halted"), " を削除してください");
+        }
+      if(InpUseTimer)
+         EventSetTimer(2);
+     }
+   PrintFormat("[AMS] 開始 %d 銘柄 %s リスク %.1f%% 口座=%s レバレッジ=1:%d ストップアウト=%.0f%s",
+               ArraySize(g_traders), EnumToString(InpTimeframe), InpRiskPercent,
+               AccountInfoString(ACCOUNT_CURRENCY), (int)AccountInfoInteger(ACCOUNT_LEVERAGE),
+               AccountInfoDouble(ACCOUNT_MARGIN_SO_SO),
+               AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE) == ACCOUNT_STOPOUT_MODE_PERCENT ? "%" : "");
    return(INIT_SUCCEEDED);
   }
 
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   EventKillTimer();
    for(int i = 0; i < ArraySize(g_traders); i++)
      {
       if(CheckPointer(g_traders[i]) == POINTER_DYNAMIC)
@@ -542,15 +629,31 @@ void OnDeinit(const int reason)
   }
 
 //+------------------------------------------------------------------+
-void OnTick(void)
+//| ターミナルのグローバル変数名（口座番号とマジックナンバーごとに分ける）      |
+//+------------------------------------------------------------------+
+string GVName(const string key)
+  {
+   return(StringFormat("AMS_%I64d_%I64u_%s", AccountInfoInteger(ACCOUNT_LOGIN), InpMagic, key));
+  }
+
+//+------------------------------------------------------------------+
+//| 全銘柄の処理（ティックとタイマーの両方から呼ぶ）                        |
+//+------------------------------------------------------------------+
+void ProcessAll(void)
   {
    //--- 口座全体のドローダウンによる停止
    const double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    if(equity > g_peakEquity)
+     {
       g_peakEquity = equity;
+      if(!MQLInfoInteger(MQL_TESTER))
+         GlobalVariableSet(GVName("peak"), g_peakEquity);
+     }
    if(!g_halted && InpMaxDDStopPct > 0.0 && equity < g_peakEquity * (1.0 - InpMaxDDStopPct / 100.0))
      {
       g_halted = true;
+      if(!MQLInfoInteger(MQL_TESTER))
+         GlobalVariableSet(GVName("halted"), 1.0);
       PrintFormat("[AMS] 最高値から %.1f%% 下落したため、全決済して新規エントリーを停止します", InpMaxDDStopPct);
       for(int i = 0; i < ArraySize(g_traders); i++)
          g_traders[i].CloseAll("DD上限");
@@ -558,6 +661,20 @@ void OnTick(void)
 
    for(int i = 0; i < ArraySize(g_traders); i++)
       g_traders[i].OnTick();
+  }
+
+//+------------------------------------------------------------------+
+void OnTick(void)
+  {
+   ProcessAll();
+  }
+
+//+------------------------------------------------------------------+
+//| 実運用のみ：チャート銘柄のティックが止まっていても、他の銘柄を処理する     |
+//+------------------------------------------------------------------+
+void OnTimer(void)
+  {
+   ProcessAll();
   }
 
 //==================================================================
@@ -616,6 +733,7 @@ void ReportBreakdown(void)
    string sN[], rN[], lN[];
    int    sT[], sW[], rT[], rW[], lT[], lW[];
    double sP[], rP[], lP[];
+   double netProfit = 0.0, costPerPip = 0.0;   // costPerPip: 全取引で1pipsずつ不利に約定した場合の損失額
 
    const int total = HistoryDealsTotal();
    for(int i = 0; i < total; i++)
@@ -644,6 +762,14 @@ void ReportBreakdown(void)
             break;
            }
         }
+      //--- コストを上乗せした場合の試算用：この取引で 1pips 不利になったときの金額
+      const string dsym   = HistoryDealGetString(deal, DEAL_SYMBOL);
+      const double tickSz = SymbolInfoDouble(dsym, SYMBOL_TRADE_TICK_SIZE);
+      if(tickSz > 0.0)
+         costPerPip += HistoryDealGetDouble(deal, DEAL_VOLUME) * PipSize(dsym) / tickSz *
+                       SymbolInfoDouble(dsym, SYMBOL_TRADE_TICK_VALUE);
+      netProfit += profit;
+
       string parts[];
       if(StringSplit(comment, '|', parts) < 4)
          continue;
@@ -661,6 +787,16 @@ void ReportBreakdown(void)
    WriteStats(fh, "symbol", sN, sT, sW, sP);
    WriteStats(fh, "regime", rN, rT, rW, rP);
    WriteStats(fh, "strategy", lN, lT, lW, lP);
+   //--- 実運用ではスリッページやスプレッド拡大で成績が悪化する。その影響の目安を出す
+   Print("[AMS] ===== 約定が不利にずれた場合の試算（1取引あたり） =====");
+   const double extra[4] = {0.0, 0.5, 1.0, 2.0};
+   for(int e = 0; e < 4; e++)
+     {
+      const double adj = netProfit - costPerPip * extra[e];
+      PrintFormat("[AMS] 追加コスト %.1f pips → 総損益 %.0f", extra[e], adj);
+      if(fh != INVALID_HANDLE)
+         FileWrite(fh, "cost", StringFormat("+%.1fpips", extra[e]), 0, 0, "", DoubleToString(adj, 0));
+     }
    if(fh != INVALID_HANDLE)
       FileClose(fh);
   }

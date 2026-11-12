@@ -41,6 +41,14 @@ on:
         description: "EA の入力を固定値にする（例: InpRiskPercent=5;InpEntryThreshold=0.5）"
         required: false
         default: ""
+      execution:
+        description: "約定の遅れ（-1=ランダム遅延 / 0=なし / ミリ秒。空なら backtest=-1, optimize=0）"
+        required: false
+        default: ""
+      deposit:
+        description: "初期資金（円。空なら 1000000）"
+        required: false
+        default: ""
       timeout_min:
         description: "テスターの制限時間（分、空なら backtest=25 / optimize=80）"
         required: false
@@ -74,6 +82,8 @@ jobs:
       BT_PERIOD: ${{ inputs.period || 'H1' }}
       BT_SYMBOLS: ${{ inputs.symbols }}
       BT_INPUTS: ${{ inputs.inputs }}
+      BT_EXECUTION: ${{ inputs.execution }}
+      BT_DEPOSIT: ${{ inputs.deposit }}
       BT_FORWARD: ${{ inputs.forward_date }}
       BT_TIMEOUT_MIN: ${{ inputs.timeout_min || (inputs.mode == 'optimize' && '80') || '25' }}
     steps:
