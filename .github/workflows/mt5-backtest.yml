@@ -3,6 +3,16 @@ name: MT5 Backtest
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "backtest=通常のバックテスト / optimize=最適化＋フォワード検証"
+        required: false
+        type: choice
+        options: [backtest, optimize]
+        default: backtest
+      forward_date:
+        description: "optimize のときのフォワード開始日 (YYYY.MM.DD、空なら10か月前の月初)"
+        required: false
+        default: ""
       from_date:
         description: "開始日 (YYYY.MM.DD、空なら2年前)"
         required: false
@@ -20,9 +30,9 @@ on:
         required: false
         default: "1"
       timeout_min:
-        description: "テスターの制限時間（分）"
+        description: "テスターの制限時間（分、空なら backtest=25 / optimize=80）"
         required: false
-        default: "25"
+        default: ""
   push:
     paths:
       - "MQL5/**"
@@ -36,7 +46,7 @@ concurrency:
 jobs:
   backtest:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
       MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
@@ -47,7 +57,9 @@ jobs:
       BT_FROM: ${{ inputs.from_date }}
       BT_TO: ${{ inputs.to_date }}
       BT_MODEL: ${{ inputs.model || '1' }}
-      BT_TIMEOUT_MIN: ${{ inputs.timeout_min || '25' }}
+      BT_MODE: ${{ inputs.mode || 'backtest' }}
+      BT_FORWARD: ${{ inputs.forward_date }}
+      BT_TIMEOUT_MIN: ${{ inputs.timeout_min || (inputs.mode == 'optimize' && '80') || '25' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,8 +92,14 @@ jobs:
         if: always() && steps.secrets.outputs.ok == 'true'
         shell: pwsh
         run: |
-          python tools/summarize_report.py reports
-          if (Test-Path reports/summary.md) { Get-Content reports/summary.md -Encoding utf8 | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
+          if ($env:BT_MODE -eq 'optimize') {
+            python tools/summarize_opt.py reports
+            $md = 'reports/optimize_summary.md'
+          } else {
+            python tools/summarize_report.py reports
+            $md = 'reports/summary.md'
+          }
+          if (Test-Path $md) { Get-Content $md -Encoding utf8 | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
 
       - name: Upload reports
         if: always()

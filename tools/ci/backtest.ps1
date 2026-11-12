@@ -10,7 +10,20 @@ $symbol = if ($env:BT_SYMBOL) { $env:BT_SYMBOL } else { 'USDJPY' }
 $from   = if ($env:BT_FROM)   { $env:BT_FROM }   else { (Get-Date).AddYears(-2).ToString('yyyy.MM.dd') }
 $to     = if ($env:BT_TO)     { $env:BT_TO }     else { (Get-Date).ToString('yyyy.MM.dd') }
 $model  = if ($env:BT_MODEL)  { $env:BT_MODEL }  else { '1' }
+$mode   = if ($env:BT_MODE)   { $env:BT_MODE }   else { 'backtest' }
 $reportName = "AMS_$($symbol -replace '[^A-Za-z0-9]', '_')_H1"
+
+# 最適化モード：前半で最適化（遺伝的アルゴリズム・カスタム評価値）、後半をフォワード検証に使う
+$optLines = "Optimization=0`r`nForwardMode=0"
+$testerInputs = ''
+if ($mode -eq 'optimize') {
+  $fwd = if ($env:BT_FORWARD) { $env:BT_FORWARD } else { (Get-Date).AddMonths(-10).ToString('yyyy.MM.01') }
+  $optLines = "Optimization=2`r`nOptimizationCriterion=6`r`nForwardMode=4`r`nForwardDate=$fwd"
+  $reportName = "AMS_opt_$($symbol -replace '[^A-Za-z0-9]', '_')_H1"
+  $testerInputs = "`r`n[TesterInputs]`r`n" + ((Get-Content (Join-Path $repo 'tester\optimize_inputs.ini') |
+    Where-Object { $_ -and -not $_.StartsWith(';') }) -join "`r`n")
+  Write-Host "最適化モード: フォワード開始日 $fwd"
+}
 
 $ini = @"
 [Common]
@@ -25,10 +38,9 @@ Expert=AdaptiveMultiStrategyEA.ex5
 Symbol=$symbol
 Period=H1
 Model=$model
-Optimization=0
+$optLines
 FromDate=$from
 ToDate=$to
-ForwardMode=0
 Deposit=1000000
 Currency=JPY
 Leverage=1:25
@@ -37,11 +49,12 @@ Visual=0
 Report=reports\$reportName
 ReplaceReport=1
 ShutdownTerminal=1
+$testerInputs
 "@
 $conf = Join-Path $dir 'ams_tester.ini'
 $ini | Out-File -FilePath $conf -Encoding ascii
 
-Write-Host "Backtest: $symbol H1 $from - $to (model=$model, server=$($env:MT5_SERVER))"
+Write-Host "Backtest: $symbol H1 $from - $to (mode=$mode, model=$model, server=$($env:MT5_SERVER))"
 # ログファイルの新しい行だけを表示する（MT5 のログは UTF-16）
 $script:shown = @{}
 function Show-NewLines([string]$pattern, [string]$tag) {
@@ -79,7 +92,8 @@ try {
   # 実行中のログを30秒ごとに表示し、致命的なエラーが出たら早めに止める
   while (-not $p.WaitForExit(30000)) {
     $new  = @(Show-NewLines "$dir\logs\*.log" 'terminal')
-    $new += @(Show-NewLines "$dir\Tester\Agent-*\logs\*.log" 'tester')
+    # 最適化中はエージェントのログが膨大になるので表示しない
+    if ($mode -ne 'optimize') { $new += @(Show-NewLines "$dir\Tester\Agent-*\logs\*.log" 'tester') }
     $fatal = $new | Where-Object {
       ($_ -match 'authorization on .* failed') -or ($_ -match "tester didn't start") -or
       ($_ -match 'tester not started') -or ($_ -match 'symbol .* not (exist|found)')
@@ -104,7 +118,7 @@ try {
     }
   }
   Show-NewLines "$dir\logs\*.log" 'terminal' | Out-Null
-  Show-NewLines "$dir\Tester\Agent-*\logs\*.log" 'tester' | Out-Null
+  if ($mode -ne 'optimize') { Show-NewLines "$dir\Tester\Agent-*\logs\*.log" 'tester' | Out-Null }
 } finally {
   Remove-Item $conf -ErrorAction SilentlyContinue   # パスワードを含むので必ず削除
 }
