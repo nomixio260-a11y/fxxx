@@ -153,6 +153,22 @@ if ($termLog) { Get-Content $termLog.FullName -Encoding Unicode | Out-File "$out
 $agentLog = Get-ChildItem "$dir\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -like '*logs*' } | Sort-Object LastWriteTime | Select-Object -Last 1
 if ($agentLog) { Get-Content $agentLog.FullName -Encoding Unicode | Out-File "$out\tester_last.log" -Encoding utf8 }
 
+# 動作確認用：取引の件数と、最初のほうの取引の抜粋（結果の1行要約と一緒に保存する）
+if (Test-Path "$out\tester_last.log") {
+  $tl = @(Get-Content "$out\tester_last.log" -Encoding utf8)
+  $slN = @($tl | Where-Object { $_ -match 'stop loss triggered' }).Count
+  $tpN = @($tl | Where-Object { $_ -match 'take profit triggered' }).Count
+  $eaN = @($tl | Where-Object { $_ -match '\[AMS\] 決済 #' }).Count
+  $soN = @($tl | Where-Object { $_ -match 'stop out' }).Count
+  $ev  = @($tl | Where-Object { $_ -match '\[AMS\] \S+ (BUY|SELL) |stop loss triggered|take profit triggered|\[AMS\] 決済 #|週明け|エントリーの方式|DD上限|下落したため' })
+  $lines = @("SAMPLE sl_hit=$slN tp_hit=$tpN closed_by_ea=$eaN stop_out=$soN")
+  $lines += ($ev | Select-Object -First 48 | ForEach-Object {
+    $x = $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 '
+    if ($x.Length -gt 150) { $x.Substring(0, 150) } else { $x }
+  })
+  $lines | Out-File "$out\trade_sample.txt" -Encoding utf8
+}
+
 if (-not (Get-ChildItem "$out\$reportName*" -ErrorAction SilentlyContinue)) {
   Write-Host '--- terminal log (tail) ---'
   if (Test-Path "$out\terminal_last.log") { Get-Content "$out\terminal_last.log" -Tail 40 }

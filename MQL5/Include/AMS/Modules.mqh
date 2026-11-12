@@ -59,6 +59,7 @@ public:
                           const int pbEmaFast, const int pbEmaSlow);
    void              Release(void);
    int               NYHour(const datetime t) const;
+   int               OpenTOD(void) const { return(m_openTOD); }
    double            EntrySignal(const double meanRevSignal);
    bool              ExitSignal(const ENUM_POSITION_TYPE type);
    void              MarkEntered(void);

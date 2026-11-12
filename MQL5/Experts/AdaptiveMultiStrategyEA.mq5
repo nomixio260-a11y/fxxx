@@ -215,6 +215,12 @@ bool CSymbolTrader::Init(const string sym)
                        InpAsiaStartNY, InpLondonOpenNY, InpLBEntryEndNY, InpLBExitNY, InpAsiaMREndNY,
                        InpRSIPeriod, InpPBRsiLow, InpPBRsiHigh, InpPBEmaFast, InpPBEmaSlow))
          return(false);
+      //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
+      const int tod = modules.OpenTOD();
+      if(tod >= 0)
+         PrintFormat("[AMS] %s 週明けの最初の足=サーバー時間 %02d:%02d（NY 17:00 として扱う）", sym, tod / 3600, (tod % 3600) / 60);
+      else
+         PrintFormat("[AMS] %s 週明けの最初の足を特定できません（時間帯を使うロジックは動きません）", sym);
      }
    //--- 起動した時点の足は処理済みとして扱う（EAの再起動直後に、足の途中で飛び乗らないため）
    lastBar = iTime(sym, InpTimeframe, 0);

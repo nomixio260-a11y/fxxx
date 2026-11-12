@@ -49,6 +49,10 @@ on:
         description: "初期資金（円。空なら 1000000）"
         required: false
         default: ""
+      sample:
+        description: "1 にすると、取引の抜粋も reports/runs に保存する（動作確認用）"
+        required: false
+        default: ""
       timeout_min:
         description: "テスターの制限時間（分、空なら backtest=25 / optimize=80）"
         required: false
@@ -84,6 +88,7 @@ jobs:
       BT_PERIOD: ${{ inputs.period || 'H1' }}
       BT_SYMBOLS: ${{ inputs.symbols }}
       BT_INPUTS: ${{ inputs.inputs }}
+      BT_SAMPLE: ${{ inputs.sample }}
       BT_EXECUTION: ${{ inputs.execution }}
       BT_DEPOSIT: ${{ inputs.deposit }}
       BT_FORWARD: ${{ inputs.forward_date }}
@@ -153,6 +158,7 @@ jobs:
           {
             echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} inputs=${BT_INPUTS:-default}"
             cat reports/result_line.txt 2>/dev/null || echo "RESULT なし（テスト失敗）"
+            if [ "${BT_SAMPLE:-}" = "1" ]; then cat reports/trade_sample.txt 2>/dev/null || true; fi
           } > "$out"
           cat "$out"
           git reset -q --hard
