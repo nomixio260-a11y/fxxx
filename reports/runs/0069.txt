@@ -1,0 +1,17 @@
+run=69 mode=backtest period=D1 model=1 exec=default from=2015.01.01 to=2021.12.31 symbols=USDJPY inputs=InpEntryMode=1;InpRiskPercent=1;InpBETriggerATR=0;InpTrailDistATR=0;InpSLATR=2;InpTPATR=0;InpFridayCloseMin=0;InpFridayCloseHour=-1;InpMaxDDStopPct=0
+RESULT net=-76642 | pf=0.00 | trades=6 | win=0(0.00%) | dd=8%(84811) | months=84 avg=-0.09% geo=-0.09% min=-3.92% max=+0.00% ge10=0 | symbol:USDJPY(5)=-38979 | regime:TREND(3)=-23796,HVOL(1)=-4722,NEUT(1)=-10461 | strategy:DT(5)=-38979 | cost:+0.0pips(0)=-38979,+0.5pips(0)=-39104,+1.0pips(0)=-39229,+2.0pips(0)=-39479
+SAMPLE sl_hit=5 tp_hit=0 closed_by_ea=0 stop_out=0
+CS	0	22:17:45.747	Tester	  === エントリーの方式 ====
+2015.01.01 00:00:00 [AMS] USDJPY 週明けの最初の足=サーバー時間 00:00（NY 17:00 として扱う）
+2015.01.01 00:00:00 [AMS] エントリーの方式: ENTRY_DAILY_TREND
+2015.03.09 02:00:07 [AMS] USDJPY BUY 0.06 lot @120.748 SL=119.145 TP=0.000 ずれ=+0.0pips [AMS|USDJPY|TREND|DT]
+2015.03.26 06:09:40 stop loss triggered #2 buy 0.06 USDJPY 120.748 sl: 119.145 [#3 sell 0.06 USDJPY at 119.145]
+2015.05.27 00:20:05 [AMS] USDJPY BUY 0.06 lot @123.122 SL=121.579 TP=0.000 ずれ=+0.0pips [AMS|USDJPY|TREND|DT]
+2015.07.08 10:04:40 stop loss triggered #4 buy 0.06 USDJPY 123.122 sl: 121.579 [#5 sell 0.06 USDJPY at 121.579]
+2015.08.25 00:20:04 [AMS] USDJPY SELL 0.02 lot @118.483 SL=120.793 TP=0.000 ずれ=+0.0pips [AMS|USDJPY|HVOL|DT]
+2015.08.27 18:52:40 stop loss triggered #6 sell 0.02 USDJPY 118.483 sl: 120.793 [#7 buy 0.02 USDJPY at 120.793]
+2015.11.19 00:20:00 [AMS] USDJPY BUY 0.06 lot @123.592 SL=122.183 TP=0.000 ずれ=+0.0pips [AMS|USDJPY|TREND|DT]
+2015.12.09 15:46:40 stop loss triggered #8 buy 0.06 USDJPY 123.592 sl: 122.183 [#9 sell 0.06 USDJPY at 122.183]
+2016.01.07 00:20:01 [AMS] USDJPY SELL 0.05 lot @118.466 SL=120.155 TP=0.000 ずれ=+0.0pips [AMS|USDJPY|NEUT|DT]
+2016.01.29 05:38:40 stop loss triggered #10 sell 0.05 USDJPY 118.466 sl: 120.155 [#11 buy 0.05 USDJPY at 120.155]
+2016.02.09 00:20:02 [AMS] USDJPY SELL 0.01 lot @115.813 SL=118.832 TP=0.000 ずれ=+0.0pips [AMS|USDJPY|HVOL|DT]
