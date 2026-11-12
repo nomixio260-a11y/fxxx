@@ -55,9 +55,24 @@ function Show-NewLines([string]$pattern, [string]$tag) {
   return $found
 }
 
+# 画面のスクリーンショット（ダイアログで止まっていないかの確認用）
+function Save-Screen([string]$path) {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+    $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $g.Dispose(); $bmp.Dispose()
+    Write-Host "画面を保存: $path"
+  } catch { Write-Host "画面の保存に失敗: $($_.Exception.Message)" }
+}
+
 try {
   $p = Start-Process -FilePath (Join-Path $dir 'terminal64.exe') -ArgumentList '/portable', "/config:`"$conf`"" -PassThru
-  $timeoutMin = if ($env:BT_TIMEOUT_MIN) { [int]$env:BT_TIMEOUT_MIN } else { 60 }
+  $timeoutMin = if ($env:BT_TIMEOUT_MIN) { [int]$env:BT_TIMEOUT_MIN } else { 25 }
+  $noConn = 0
   $deadline = (Get-Date).AddMinutes($timeoutMin)
   # 実行中のログを30秒ごとに表示し、致命的なエラーが出たら早めに止める
   while (-not $p.WaitForExit(30000)) {
@@ -67,13 +82,17 @@ try {
       ($_ -match 'authorization on .* failed') -or ($_ -match "tester didn't start") -or
       ($_ -match 'tester not started') -or ($_ -match 'symbol .* not (exist|found)')
     }
+    $noConn += @($new | Where-Object { $_ -match 'no connection|server .* not found|common error|invalid server' }).Count
+    if (-not $fatal -and $noConn -ge 5) { $fatal = @('接続エラーが繰り返し発生（サーバー名が見つからない可能性）') }
     if ($fatal) {
+      Save-Screen (Join-Path $out 'screen_at_error.png')
       Write-Host "エラーを検出したため停止します: $($fatal | Select-Object -First 1)"
       Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
       break
     }
     if ((Get-Date) -gt $deadline) {
-      Write-Host "タイムアウト（$timeoutMin 分）。ターミナルを停止します。"
+      Write-Host "タイムアウト（$timeoutMin 分）。画面を保存してからターミナルを停止します。"
+      Save-Screen (Join-Path $out 'screen_at_timeout.png')
       Get-Process terminal64, metatester64 -ErrorAction SilentlyContinue | Stop-Process -Force
       break
     }

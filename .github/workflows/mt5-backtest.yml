@@ -19,6 +19,10 @@ on:
         description: "0=全ティック 1=1分足OHLC 2=始値のみ 4=リアルティック"
         required: false
         default: "1"
+      timeout_min:
+        description: "テスターの制限時間（分）"
+        required: false
+        default: "25"
   push:
     paths:
       - "MQL5/**"
@@ -42,6 +46,7 @@ jobs:
       BT_FROM: ${{ inputs.from_date }}
       BT_TO: ${{ inputs.to_date }}
       BT_MODEL: ${{ inputs.model || '1' }}
+      BT_TIMEOUT_MIN: ${{ inputs.timeout_min || '25' }}
     steps:
       - uses: actions/checkout@v4
 
