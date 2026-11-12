@@ -32,7 +32,7 @@ concurrency:
 jobs:
   backtest:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     env:
       MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
       MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
