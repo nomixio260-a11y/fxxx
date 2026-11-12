@@ -8,3 +8,4 @@ tester/credentials.env
 !reports/*.log
 *.tmp
 __pycache__/
+data/
