@@ -99,12 +99,28 @@ def main():
     bd = os.path.join(out_dir, "AMS_breakdown.csv")
     if os.path.exists(bd):
         rows = list(csv.DictReader(open(bd, encoding="utf-8")))
-        for kind, title in (("regime", "相場状況別"), ("strategy", "ロジック別（エントリーを主導したロジック）")):
+        for kind, title in (("symbol", "銘柄別"), ("regime", "相場状況別"), ("strategy", "ロジック別（エントリーを主導したロジック）")):
             sub = [r for r in rows if r.get("kind") == kind]
             if not sub:
                 continue
             lines += [f"## {title}", "", "| 名前 | 取引数 | 勝ち | 勝率(%) | 損益 |", "|---|---|---|---|---|"]
             lines += [f"| {r['name']} | {r['trades']} | {r['wins']} | {r['win_rate']} | {r['profit']} |" for r in sub]
+            lines.append("")
+
+    mp = os.path.join(out_dir, "AMS_monthly.csv")
+    if os.path.exists(mp):
+        rows = list(csv.DictReader(open(mp, encoding="utf-8")))
+        if rows:
+            rets = [float(r["return_pct"]) for r in rows]
+            growth = 1.0
+            for r in rets:
+                growth *= max(1.0 + r / 100.0, 0.0)
+            geo = (growth ** (1.0 / len(rets)) - 1.0) * 100.0 if growth > 0 else -100.0
+            lines += ["## 月ごとの損益率（確定損益ベース）", "",
+                      f"- 平均 **{sum(rets) / len(rets):+.2f}%**、幾何平均 **{geo:+.2f}%**、最低 {min(rets):+.2f}%、最高 {max(rets):+.2f}%、"
+                      f"+10%以上の月 {sum(1 for r in rets if r >= 10)} / {len(rets)}", "",
+                      "| 月 | 月初の残高 | 損益 | 損益率 |", "|---|---|---|---|"]
+            lines += [f"| {r['month']} | {float(r['start_balance']):,.0f} | {float(r['profit']):,.0f} | {float(r['return_pct']):+.2f}% |" for r in rows]
             lines.append("")
 
     lines += [

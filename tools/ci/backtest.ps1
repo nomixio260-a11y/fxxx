@@ -11,19 +11,34 @@ $from   = if ($env:BT_FROM)   { $env:BT_FROM }   else { (Get-Date).AddYears(-2).
 $to     = if ($env:BT_TO)     { $env:BT_TO }     else { (Get-Date).ToString('yyyy.MM.dd') }
 $model  = if ($env:BT_MODEL)  { $env:BT_MODEL }  else { '1' }
 $mode   = if ($env:BT_MODE)   { $env:BT_MODE }   else { 'backtest' }
-$reportName = "AMS_$($symbol -replace '[^A-Za-z0-9]', '_')_H1"
+$period = if ($env:BT_PERIOD) { $env:BT_PERIOD } else { 'H1' }
+$tfValue = @{ 'M5' = 5; 'M15' = 15; 'M30' = 30; 'H1' = 16385; 'H2' = 16386; 'H4' = 16388 }[$period]
+if (-not $tfValue) { throw "未対応の時間足: $period" }
+$reportName = "AMS_$($symbol -replace '[^A-Za-z0-9]', '_')_$period"
+
+# EA の入力値の上書き（[TesterInputs]）。書式: 名前=値||開始||刻み||終了||Y/N
+$inputLines = @("InpTimeframe=$tfValue||$tfValue||0||$tfValue||N")
+if ($env:BT_SYMBOLS) { $inputLines += "InpSymbols=$($env:BT_SYMBOLS)" }
+# BT_INPUTS: 「名前=値;名前=値」で任意の入力を固定値にする
+if ($env:BT_INPUTS) {
+  foreach ($kv in ($env:BT_INPUTS -split ';')) {
+    if ($kv -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$') { $inputLines += "$($matches[1])=$($matches[2])||$($matches[2])||0||$($matches[2])||N" }
+  }
+}
 
 # 最適化モード：前半で最適化（遺伝的アルゴリズム・カスタム評価値）、後半をフォワード検証に使う
 $optLines = "Optimization=0`r`nForwardMode=0"
-$testerInputs = ''
 if ($mode -eq 'optimize') {
   $fwd = if ($env:BT_FORWARD) { $env:BT_FORWARD } else { (Get-Date).AddMonths(-10).ToString('yyyy.MM.01') }
   $optLines = "Optimization=2`r`nOptimizationCriterion=6`r`nForwardMode=4`r`nForwardDate=$fwd"
-  $reportName = "AMS_opt_$($symbol -replace '[^A-Za-z0-9]', '_')_H1"
-  $testerInputs = "`r`n[TesterInputs]`r`n" + ((Get-Content (Join-Path $repo 'tester\optimize_inputs.ini') |
-    Where-Object { $_ -and -not $_.StartsWith(';') }) -join "`r`n")
+  $reportName = "AMS_opt_$($symbol -replace '[^A-Za-z0-9]', '_')_$period"
+  $fixed = $inputLines | ForEach-Object { ($_ -split '=')[0] }
+  $inputLines += (Get-Content (Join-Path $repo 'tester\optimize_inputs.ini') |
+    Where-Object { $_ -and -not $_.StartsWith(';') -and ($fixed -notcontains ($_ -split '=')[0]) })
   Write-Host "最適化モード: フォワード開始日 $fwd"
 }
+$testerInputs = "`r`n[TesterInputs]`r`n" + ($inputLines -join "`r`n")
+Write-Host "入力の上書き:`n$($inputLines -join "`n")"
 
 $ini = @"
 [Common]
@@ -36,7 +51,7 @@ NewsEnable=0
 [Tester]
 Expert=AdaptiveMultiStrategyEA.ex5
 Symbol=$symbol
-Period=H1
+Period=$period
 Model=$model
 $optLines
 FromDate=$from
@@ -125,8 +140,10 @@ try {
 
 # レポート・ログの回収（ログは UTF-16 → UTF-8）
 Get-ChildItem "$dir\reports\$reportName*" -ErrorAction SilentlyContinue | Copy-Item -Destination $out -Force
-$common = Join-Path $env:APPDATA 'MetaQuotes\Terminal\Common\Files\AMS_breakdown.csv'
-if (Test-Path $common) { Get-Content $common | Out-File "$out\AMS_breakdown.csv" -Encoding utf8 }
+foreach ($f in 'AMS_breakdown.csv', 'AMS_monthly.csv') {
+  $common = Join-Path $env:APPDATA "MetaQuotes\Terminal\Common\Files\$f"
+  if (Test-Path $common) { Get-Content $common | Out-File "$out\$f" -Encoding utf8 }
+}
 $termLog = Get-ChildItem "$dir\logs\*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
 if ($termLog) { Get-Content $termLog.FullName -Encoding Unicode | Out-File "$out\terminal_last.log" -Encoding utf8 }
 $agentLog = Get-ChildItem "$dir\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -like '*logs*' } | Sort-Object LastWriteTime | Select-Object -Last 1

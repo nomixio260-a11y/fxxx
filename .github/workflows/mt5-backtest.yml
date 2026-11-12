@@ -29,6 +29,18 @@ on:
         description: "0=全ティック 1=1分足OHLC 2=始値のみ 4=リアルティック"
         required: false
         default: "1"
+      period:
+        description: "時間足 (M15 / M30 / H1 / H4)"
+        required: false
+        default: "H1"
+      symbols:
+        description: "取引する銘柄（カンマ区切り。空なら EA の既定値）"
+        required: false
+        default: ""
+      inputs:
+        description: "EA の入力を固定値にする（例: InpRiskPercent=5;InpEntryThreshold=0.5）"
+        required: false
+        default: ""
       timeout_min:
         description: "テスターの制限時間（分、空なら backtest=25 / optimize=80）"
         required: false
@@ -58,6 +70,9 @@ jobs:
       BT_TO: ${{ inputs.to_date }}
       BT_MODEL: ${{ inputs.model || '1' }}
       BT_MODE: ${{ inputs.mode || 'backtest' }}
+      BT_PERIOD: ${{ inputs.period || 'H1' }}
+      BT_SYMBOLS: ${{ inputs.symbols }}
+      BT_INPUTS: ${{ inputs.inputs }}
       BT_FORWARD: ${{ inputs.forward_date }}
       BT_TIMEOUT_MIN: ${{ inputs.timeout_min || (inputs.mode == 'optimize' && '80') || '25' }}
     steps:

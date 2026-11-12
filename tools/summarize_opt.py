@@ -75,7 +75,8 @@ def main():
         if num(b.get("Profit")) <= 0 or num(f.get("Profit")) <= 0 or num(f.get("Trades")) < MIN_FWD_TRADES:
             continue
         candidates.append((p, b, f))
-    candidates.sort(key=lambda x: (num(x[2].get("Profit Factor")), num(x[2].get("Profit"))), reverse=True)
+    # 評価値（Result / Forward Result）は EA の OnTester が返す「月利の幾何平均（%）」
+    candidates.sort(key=lambda x: (num(x[2].get("Forward Result", x[2].get("Result"))), num(x[2].get("Profit"))), reverse=True)
 
     params = [k for k in (next(iter(back.values())).keys() if back else []) if k not in METRIC_COLS]
     lines = [
@@ -86,12 +87,12 @@ def main():
         "",
     ]
     if candidates:
-        head = "| # | フォワード損益 | フォワードPF | フォワード取引 | フォワードDD% | バック損益 | バックPF | " + " | ".join(params) + " |"
-        lines += [head, "|" + "---|" * (7 + len(params))]
+        head = "| # | フォワード月利(幾何平均%) | フォワード損益 | フォワードPF | フォワード取引 | フォワードDD% | バック月利% | バック損益 | バックPF | " + " | ".join(params) + " |"
+        lines += [head, "|" + "---|" * (9 + len(params))]
         for i, (p, b, f) in enumerate(candidates[:15], 1):
             vals = " | ".join(b.get(k, "") for k in params)
-            lines.append(f"| {i} | {num(f.get('Profit')):,.0f} | {f.get('Profit Factor')} | {f.get('Trades')} | "
-                         f"{f.get('Equity DD %')} | {num(b.get('Profit')):,.0f} | {b.get('Profit Factor')} | {vals} |")
+            lines.append(f"| {i} | {num(f.get('Forward Result', f.get('Result'))):+.2f} | {num(f.get('Profit')):,.0f} | {f.get('Profit Factor')} | {f.get('Trades')} | "
+                         f"{f.get('Equity DD %')} | {num(b.get('Result')):+.2f} | {num(b.get('Profit')):,.0f} | {b.get('Profit Factor')} | {vals} |")
     else:
         lines.append("バック・フォワードの両方で利益が出た設定はありませんでした。")
         # 参考：フォワード損益の上位
