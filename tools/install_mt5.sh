@@ -29,6 +29,14 @@ if [[ ! -d "$WINEPREFIX/drive_c" ]]; then
 fi
 # MT5 は Windows 10 として動かす
 xvfb-run -a wine reg add 'HKEY_CURRENT_USER\Software\Wine' /v Version /t REG_SZ /d win10 /f >/dev/null
+# HTTPS_PROXY がある環境では、Windows アプリ（WinINet）にも同じプロキシを使わせる
+if [[ -n "${HTTPS_PROXY:-}" ]]; then
+  PROXY_HOSTPORT="${HTTPS_PROXY#*://}"; PROXY_HOSTPORT="${PROXY_HOSTPORT%/}"
+  IS_KEY='HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
+  xvfb-run -a wine reg add "$IS_KEY" /v ProxyEnable /t REG_DWORD /d 1 /f >/dev/null
+  xvfb-run -a wine reg add "$IS_KEY" /v ProxyServer /t REG_SZ /d "$PROXY_HOSTPORT" /f >/dev/null
+  echo "Wine のプロキシ設定: $PROXY_HOSTPORT"
+fi
 wineserver -w
 
 echo "== 3/3 MetaTrader 5 のインストール =="
