@@ -51,6 +51,7 @@ input double           InpFixMaxSpreadPips  = 1.5;         // [東京仲値] ス
 input string           InpCalendarRules     = "";          // [時刻ルール] "名前:銘柄|時計|HHMM|保有分|BUY/SELL|日の条件|SLpips" を ; で区切る
 input string           InpCalendarRules2    = "";          // [時刻ルール] 続き（テスターの入力は1つ255文字までのため、分けて書ける）
 input string           InpCalendarRules3    = "";          // [時刻ルール] 続き
+input int              InpEntryDelaySec     = 15;          // [時刻ルール] 足の始まりから注文までの待ち（秒）。全銘柄の足がそろってから優先順に注文する
 input string           InpJPHolidays        = "";          // [東京仲値] 追加の休業日（例 2027.01.01,2027.01.11。2015〜2026年は内蔵）
 
 input group "=== 相場状況（レジーム）判定 ==="
@@ -190,6 +191,8 @@ public:
    bool              pendSpreadWait;  // スプレッドが広くて待っているか（見送りの集計用）
    datetime          lastEntryTry;
    bool              noLots;          // 直前の Open が「証拠金の余裕がなくロット0」で見送ったか
+   int               pendPrio;        // 保留中のシグナルの優先順位（時刻ルール。小さいほど先）
+   datetime          pendBarTime;     // 保留中のシグナルを出した足の始まり
 
    //--- 保留中の決済（日付の変わり目など、市場が閉じていて決済できないときに再試行する）
    bool              pendCloseBuy;
@@ -200,7 +203,7 @@ public:
                      CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0),
                                            pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0), pendSLPips(0.0),
                                            pendSpreadWait(false),
-                                           pendUntil(0), lastEntryTry(0), noLots(false),
+                                           pendUntil(0), lastEntryTry(0), noLots(false), pendPrio(1000000), pendBarTime(0),
                                            pendCloseBuy(false), pendCloseSell(false), pendCloseReason(""),
                                            lastExitTry(0) {}
 
@@ -208,6 +211,7 @@ public:
    void              Release(void) { regime.Release(); strategies.Release(); modules.Release(); }
    void              OnTick(void);       // 段階1：週末前の決済・新しい足の判定・決済
    void              OnTickEnter(void);  // 段階2：新規注文・ストップの管理（全銘柄の決済が済んでから）
+   int               PendingPrio(void) const { return(pendDir != 0 ? pendPrio : 1000000); }
    void              CloseAll(const string reason) { g_trade.SetTypeFillingBySymbol(symbol); risk.CloseAll(reason); }
    bool              WeekendCloseTime(void);
 
@@ -439,6 +443,8 @@ void CSymbolTrader::OnBar(void)
    pendMul   = riskMul;
    pendUntil = iTime(symbol, InpTimeframe, 0) + PeriodSeconds(InpTimeframe) / 4;
    pendSpreadWait = false;
+   pendPrio       = (InpEntryMode == ENTRY_CALENDAR) ? modules.PendingRulePrio() : 1000000;
+   pendBarTime    = iTime(symbol, InpTimeframe, 0);
    pendSLPips     = (InpEntryMode == ENTRY_CALENDAR) ? modules.PendingRuleSL()
                     : ((InpEntryMode == ENTRY_TOKYO_FIX) ? InpFixStopPips : 0.0);
    g_sigTotal++;
@@ -505,6 +511,10 @@ void CSymbolTrader::TryEnter(void)
          return;
         }
    pendSpreadWait = false;
+   //--- 時刻ルール：同じ時刻に複数の銘柄のルールが出る場合、ティックの届く順番に左右されないよう、
+   //    全銘柄の足がそろうまで少し待ってから、優先順位の順に注文する（ProcessAll で並べ替える）
+   if(InpEntryMode == ENTRY_CALENDAR && InpEntryDelaySec > 0 && TimeCurrent() < pendBarTime + InpEntryDelaySec)
+      return;
    if(TimeCurrent() - lastEntryTry < 5)
       return;
    lastEntryTry = TimeCurrent();
@@ -865,8 +875,25 @@ void ProcessAll(void)
 
    for(int i = 0; i < ArraySize(g_traders); i++)
       g_traders[i].OnTick();
-   for(int i = 0; i < ArraySize(g_traders); i++)
-      g_traders[i].OnTickEnter();
+   //--- 新規注文は、保留中のシグナルの優先順位の順に行う（同じ時刻のルールが証拠金を取り合う場合に、結果を決まったものにする）
+   const int n = ArraySize(g_traders);
+   int order[];
+   ArrayResize(order, n);
+   for(int i = 0; i < n; i++)
+      order[i] = i;
+   for(int i = 1; i < n; i++)
+     {
+      const int v = order[i];
+      int j = i - 1;
+      while(j >= 0 && g_traders[order[j]].PendingPrio() > g_traders[v].PendingPrio())
+        {
+         order[j + 1] = order[j];
+         j--;
+        }
+      order[j + 1] = v;
+     }
+   for(int i = 0; i < n; i++)
+      g_traders[order[i]].OnTickEnter();
   }
 
 //+------------------------------------------------------------------+

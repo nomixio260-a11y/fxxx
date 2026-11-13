@@ -85,6 +85,7 @@ private:
    int               m_ruleFilter[];  // 日の条件（下の RULE_* ）
    double            m_ruleSL[];      // SL（pips）
    string            m_ruleName[];
+   int               m_rulePrio[];    // 優先順位（入力に書いた順。小さいほど先に注文する）
    int               m_pendRule;      // シグナルを出したルール（エントリー待ち）
    int               m_activeRule;    // 保有中のポジションのルール
    datetime          m_activeUntil;   // 保有中のポジションを決済する時刻（サーバー時間）
@@ -126,6 +127,7 @@ public:
    int               SetRules(const string rules);
    double            PendingRuleSL(void) const { return(m_pendRule >= 0 ? m_ruleSL[m_pendRule] : 0.0); }
    string            PendingRuleName(void) const { return(m_pendRule >= 0 ? m_ruleName[m_pendRule] : ""); }
+   int               PendingRulePrio(void) const { return(m_pendRule >= 0 ? m_rulePrio[m_pendRule] : 1000000); }
    datetime          TokyoTime(const datetime serverTime) const;
    double            EntrySignal(const double meanRevSignal);
    bool              ExitSignal(const ENUM_POSITION_TYPE type);
@@ -661,6 +663,7 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_ruleFilter, m_ruleCount);
       ArrayResize(m_ruleSL, m_ruleCount);
       ArrayResize(m_ruleName, m_ruleCount);
+      ArrayResize(m_rulePrio, m_ruleCount);
       m_ruleClock[k]  = clock;
       m_ruleHHMM[k]   = (int)StringToInteger(f[2]);
       m_ruleHold[k]   = (int)StringToInteger(f[3]);
@@ -668,6 +671,7 @@ int CModuleSet::SetRules(const string rules)
       m_ruleFilter[k] = filter;
       m_ruleSL[k]     = StringToDouble(f[6]);
       m_ruleName[k]   = name;
+      m_rulePrio[k]   = i;
       PrintFormat("[AMS] %s 時刻ルール %s: %s %04d から %d 分 %s（%s）SL %.0f pips",
                   m_symbol, name, f[1], m_ruleHHMM[k], m_ruleHold[k], f[4], f[5], m_ruleSL[k]);
      }
