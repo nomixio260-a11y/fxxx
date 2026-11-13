@@ -29,7 +29,8 @@ enum ENUM_AMS_ENTRY_MODE
    ENTRY_LONDON_BO   = 2,   // ロンドン・ブレイクアウト
    ENTRY_PULLBACK    = 3,   // 押し目買い/戻り売り
    ENTRY_ASIA_MR     = 4,   // アジア時間の逆張り
-   ENTRY_TOKYO_FIX   = 5    // 東京仲値（ゴトー日）
+   ENTRY_TOKYO_FIX   = 5,   // 東京仲値（ゴトー日）
+   ENTRY_CALENDAR    = 6    // 時刻ルール（複数）
   };
 
 //--- 売買ロジック
@@ -77,6 +78,7 @@ string EntryModeShortName(const ENUM_AMS_ENTRY_MODE mode)
       case ENTRY_PULLBACK:    return("PB");
       case ENTRY_ASIA_MR:     return("AM");
       case ENTRY_TOKYO_FIX:   return("TFX");
+      case ENTRY_CALENDAR:    return("CAL");
       default:                return("W");
      }
   }

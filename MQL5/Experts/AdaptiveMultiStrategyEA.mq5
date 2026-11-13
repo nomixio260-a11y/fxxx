@@ -48,6 +48,7 @@ input bool             InpFixGotobiOnly     = true;        // [東京仲値] ゴ
 input int              InpFixDirection      = 1;           // [東京仲値] 1 = 買い / -1 = 売り
 input double           InpFixStopPips       = 30.0;        // [東京仲値] SL の幅（pips）
 input double           InpFixMaxSpreadPips  = 1.5;         // [東京仲値] スプレッドがこの pips を超えていたら待つ
+input string           InpCalendarRules     = "";          // [時刻ルール] "名前:銘柄|時計|HHMM|保有分|BUY/SELL|日の条件|SLpips" を ; で区切る
 input string           InpJPHolidays        = "";          // [東京仲値] 追加の休業日（例 2027.01.01,2027.01.11。2015〜2026年は内蔵）
 
 input group "=== 相場状況（レジーム）判定 ==="
@@ -181,6 +182,7 @@ public:
    ENUM_AMS_REGIME   pendReg;
    string            pendTag;
    double            pendMul;
+   double            pendSLPips;      // 固定の SL（pips）。0 なら ATR で決める
    datetime          pendUntil;       // この時刻を過ぎたら古いシグナルとして捨てる
    bool              pendSpreadWait;  // スプレッドが広くて待っているか（見送りの集計用）
    datetime          lastEntryTry;
@@ -192,7 +194,7 @@ public:
    datetime          lastExitTry;
 
                      CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0),
-                                           pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0),
+                                           pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0), pendSLPips(0.0),
                                            pendSpreadWait(false),
                                            pendUntil(0), lastEntryTry(0),
                                            pendCloseBuy(false), pendCloseSell(false), pendCloseReason(""),
@@ -239,6 +241,11 @@ bool CSymbolTrader::Init(const string sym)
          return(false);
       modules.SetTokyoFix(InpFixEntryHHMM, InpFixExitHHMM, InpFixGotobiOnly, InpFixDirection);
       modules.AddHolidays(InpJPHolidays);
+      if(InpEntryMode == ENTRY_CALENDAR && modules.SetRules(InpCalendarRules) == 0)
+        {
+         PrintFormat("[AMS] %s に当てはまる時刻ルールがないため、この銘柄は取引しません", sym);
+         return(false);
+        }
       //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
       const int tod = modules.OpenTOD();
       if(tod >= 0)
@@ -374,6 +381,8 @@ void CSymbolTrader::OnBar(void)
       score     = modules.EntrySignal(signals[STRAT_MEANREV]);
       threshold = 0.5;
       tag       = EntryModeShortName(InpEntryMode);
+      if(InpEntryMode == ENTRY_CALENDAR && score != 0.0)
+         tag = modules.PendingRuleName();
      }
 
    if(InpVerbose)
@@ -414,6 +423,8 @@ void CSymbolTrader::OnBar(void)
    pendMul   = riskMul;
    pendUntil = iTime(symbol, InpTimeframe, 0) + PeriodSeconds(InpTimeframe) / 4;
    pendSpreadWait = false;
+   pendSLPips     = (InpEntryMode == ENTRY_CALENDAR) ? modules.PendingRuleSL()
+                    : ((InpEntryMode == ENTRY_TOKYO_FIX) ? InpFixStopPips : 0.0);
    g_sigTotal++;
   }
 
@@ -462,7 +473,7 @@ void CSymbolTrader::TryEnter(void)
          return;
      }
    const double spread = SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID);
-   if(InpEntryMode == ENTRY_TOKYO_FIX)
+   if(InpEntryMode == ENTRY_TOKYO_FIX || InpEntryMode == ENTRY_CALENDAR)
      {
       //--- 短い時間足の ATR は小さすぎて基準にならないので、pips で上限を決める
       if(InpFixMaxSpreadPips > 0.0 && spread > InpFixMaxSpreadPips * PipSize(symbol))
@@ -552,8 +563,8 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
          return(false);
       const double entry = isBuy ? tick.ask : tick.bid;
       //--- 東京仲値は保有時間が短く決まっているので、SL は固定の pips、TP なし（時刻で決済）
-      const bool   fixMode = (InpEntryMode == ENTRY_TOKYO_FIX && InpFixStopPips > 0.0);
-      const double slDist  = fixMode ? InpFixStopPips * PipSize(symbol) : atr * InpSLATR;
+      const bool   fixMode = (pendSLPips > 0.0);
+      const double slDist  = fixMode ? pendSLPips * PipSize(symbol) : atr * InpSLATR;
       double sl = isBuy ? entry - slDist : entry + slDist;
       double tp = 0.0;
       if(InpTPATR > 0.0 && !fixMode)

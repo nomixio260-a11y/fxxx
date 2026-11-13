@@ -76,6 +76,19 @@ private:
    bool              m_fixGotobiOnly; // 東京仲値：ゴトー日だけ取引する
    int               m_fixDir;        // 東京仲値：+1 買い / -1 売り
 
+   //--- 時刻ルール（ENTRY_CALENDAR）。この銘柄に当てはまるルールだけを持つ
+   int               m_ruleCount;
+   int               m_ruleClock[];   // 0 = 東京, 1 = ロンドン, 2 = ニューヨーク
+   int               m_ruleHHMM[];    // 入る時刻（現地時間 HHMM）
+   int               m_ruleHold[];    // 保有時間（分）
+   int               m_ruleDir[];     // +1 買い / -1 売り
+   int               m_ruleFilter[];  // 日の条件（下の RULE_* ）
+   double            m_ruleSL[];      // SL（pips）
+   string            m_ruleName[];
+   int               m_pendRule;      // シグナルを出したルール（エントリー待ち）
+   int               m_activeRule;    // 保有中のポジションのルール
+   datetime          m_activeUntil;   // 保有中のポジションを決済する時刻（サーバー時間）
+
    void              UpdateWeeklyOpen(void);
    bool              HourIn(const int h, const int from, const int to) const;
    long              NYDay(const datetime t) const;
@@ -89,6 +102,11 @@ private:
    bool              IsTokyoBusinessDay(const datetime tokyo) const;
    int               m_extraHolidays[];   // 入力で追加した休業日（YYYYMMDD）
    int               TokyoHHMM(const datetime tokyo) const;
+   datetime          UTCTime(const datetime serverTime) const;
+   bool              IsUKDST(const datetime utc) const;
+   datetime          LocalTime(const datetime serverTime, const int clock) const;
+   bool              RuleDayOK(const int filter, const datetime local, const int clock) const;
+   double            CalendarSignal(void);
 
 public:
                      CModuleSet(void);
@@ -105,6 +123,9 @@ public:
    int               OpenTOD(void) const { return(m_openTOD); }
    void              SetTokyoFix(const int entryHHMM, const int exitHHMM, const bool gotobiOnly, const int dir);
    void              AddHolidays(const string list);
+   int               SetRules(const string rules);
+   double            PendingRuleSL(void) const { return(m_pendRule >= 0 ? m_ruleSL[m_pendRule] : 0.0); }
+   string            PendingRuleName(void) const { return(m_pendRule >= 0 ? m_ruleName[m_pendRule] : ""); }
    datetime          TokyoTime(const datetime serverTime) const;
    double            EntrySignal(const double meanRevSignal);
    bool              ExitSignal(const ENUM_POSITION_TYPE type);
@@ -133,7 +154,11 @@ CModuleSet::CModuleSet(void) : m_symbol(""),
                                m_fixEntry(800),
                                m_fixExit(955),
                                m_fixGotobiOnly(true),
-                               m_fixDir(1)
+                               m_fixDir(1),
+                               m_ruleCount(0),
+                               m_pendRule(-1),
+                               m_activeRule(-1),
+                               m_activeUntil(0)
   {
   }
 
@@ -242,6 +267,12 @@ void CModuleSet::MarkEntered(void)
    const datetime t = iTime(m_symbol, m_tf, 1);
    if(t > 0 && m_openTOD >= 0)
       m_lastEntryDay = NYDay(t);
+   if(m_mode == ENTRY_CALENDAR && m_pendRule >= 0)
+     {
+      //--- 決済の時刻 = シグナルを出した足の始まり + 保有時間
+      m_activeRule  = m_pendRule;
+      m_activeUntil = iTime(m_symbol, m_tf, 0) + m_ruleHold[m_pendRule] * 60;
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -261,6 +292,8 @@ double CModuleSet::EntrySignal(const double meanRevSignal)
          return(Pullback());
       case ENTRY_TOKYO_FIX:
          return(TokyoFix());
+      case ENTRY_CALENDAR:
+         return(CalendarSignal());
       case ENTRY_ASIA_MR:
         {
          const int h = NYHour(iTime(m_symbol, m_tf, 0));
@@ -280,6 +313,9 @@ bool CModuleSet::ExitSignal(const ENUM_POSITION_TYPE type)
    const int h = NYHour(iTime(m_symbol, m_tf, 0));
    switch(m_mode)
      {
+      case ENTRY_CALENDAR:
+         //--- ルールの保有時間が過ぎたら決済する（決済時刻が不明なポジションも決済する）
+         return(m_activeUntil == 0 || iTime(m_symbol, m_tf, 0) >= m_activeUntil);
       case ENTRY_LONDON_BO:
          //--- 当日中（NY の昼〜引け）に決済する
          return(HourIn(h, m_lbExit, 17));
@@ -543,6 +579,202 @@ double CModuleSet::TokyoFix(void)
    if(!IsTokyoBusinessDay(tokyo))
       return(0.0);
    return((double)m_fixDir);
+  }
+
+//+------------------------------------------------------------------+
+//| 時刻ルールを読み込む（この銘柄のものだけ）。                            |
+//| 書式："名前:銘柄|時計|HHMM|保有分|向き|日の条件|SLpips" を ; で区切る     |
+//|   時計：TKY / LDN / NY    向き：BUY / SELL                            |
+//|   日の条件：ALL / GOTOBI / MONTHEND / MONTHSTART / MON〜FRI            |
+//|   例）"R1:EURUSD|NY|0200|360|SELL|ALL|25;R2:USDJPY|TKY|0955|125|SELL|GOTOBI|30" |
+//| 戻り値：読み込んだルールの数                                           |
+//+------------------------------------------------------------------+
+#define RULE_ALL        0
+#define RULE_GOTOBI     1
+#define RULE_MONTHEND   2
+#define RULE_MONTHSTART 3
+#define RULE_DOW_BASE   10   // 10 + 曜日（1 = 月 〜 5 = 金）
+
+int CModuleSet::SetRules(const string rules)
+  {
+   m_ruleCount = 0;
+   string items[];
+   const int n = StringSplit(rules, ';', items);
+   for(int i = 0; i < n; i++)
+     {
+      string item = items[i];
+      StringTrimLeft(item);
+      StringTrimRight(item);
+      if(item == "")
+         continue;
+      string name = StringFormat("R%d", i + 1);
+      const int colon = StringFind(item, ":");
+      if(colon > 0)
+        {
+         name = StringSubstr(item, 0, colon);
+         item = StringSubstr(item, colon + 1);
+        }
+      string f[];
+      if(StringSplit(item, '|', f) != 7)
+        {
+         PrintFormat("[AMS] 時刻ルールの書式が正しくありません: %s", items[i]);
+         continue;
+        }
+      for(int k = 0; k < 7; k++)
+        {
+         StringTrimLeft(f[k]);
+         StringTrimRight(f[k]);
+         StringToUpper(f[k]);
+        }
+      //--- 銘柄名は接尾辞（.oj1m など）を無視して比べる
+      if(StringFind(m_symbol, f[0]) != 0)
+         continue;
+      int clock = -1;
+      if(f[1] == "TKY") clock = 0;
+      if(f[1] == "LDN") clock = 1;
+      if(f[1] == "NY")  clock = 2;
+      int filter = -1;
+      if(f[5] == "ALL")        filter = RULE_ALL;
+      if(f[5] == "GOTOBI")     filter = RULE_GOTOBI;
+      if(f[5] == "MONTHEND")   filter = RULE_MONTHEND;
+      if(f[5] == "MONTHSTART") filter = RULE_MONTHSTART;
+      const string dows[5] = {"MON", "TUE", "WED", "THU", "FRI"};
+      for(int k = 0; k < 5; k++)
+         if(f[5] == dows[k])
+            filter = RULE_DOW_BASE + k + 1;
+      const int dir = (f[4] == "BUY") ? 1 : ((f[4] == "SELL") ? -1 : 0);
+      if(clock < 0 || filter < 0 || dir == 0)
+        {
+         PrintFormat("[AMS] 時刻ルールの値が正しくありません: %s", items[i]);
+         continue;
+        }
+      const int k = m_ruleCount++;
+      ArrayResize(m_ruleClock, m_ruleCount);
+      ArrayResize(m_ruleHHMM, m_ruleCount);
+      ArrayResize(m_ruleHold, m_ruleCount);
+      ArrayResize(m_ruleDir, m_ruleCount);
+      ArrayResize(m_ruleFilter, m_ruleCount);
+      ArrayResize(m_ruleSL, m_ruleCount);
+      ArrayResize(m_ruleName, m_ruleCount);
+      m_ruleClock[k]  = clock;
+      m_ruleHHMM[k]   = (int)StringToInteger(f[2]);
+      m_ruleHold[k]   = (int)StringToInteger(f[3]);
+      m_ruleDir[k]    = dir;
+      m_ruleFilter[k] = filter;
+      m_ruleSL[k]     = StringToDouble(f[6]);
+      m_ruleName[k]   = name;
+      PrintFormat("[AMS] %s 時刻ルール %s: %s %04d から %d 分 %s（%s）SL %.0f pips",
+                  m_symbol, name, f[1], m_ruleHHMM[k], m_ruleHold[k], f[4], f[5], m_ruleSL[k]);
+     }
+   return(m_ruleCount);
+  }
+
+//+------------------------------------------------------------------+
+//| サーバー時間 → UTC（週明けの最初の足 = NY 17:00 を基準にする）           |
+//+------------------------------------------------------------------+
+datetime CModuleSet::UTCTime(const datetime serverTime) const
+  {
+   const int nyCloseUTC = IsUSDST(serverTime) ? 21 : 22;
+   return((datetime)((long)serverTime - m_openTOD + (nyCloseUTC - 24) * 3600));
+  }
+
+//+------------------------------------------------------------------+
+//| イギリスの夏時間か（3月最終日曜〜10月最終日曜。日付単位で判定）           |
+//+------------------------------------------------------------------+
+bool CModuleSet::IsUKDST(const datetime utc) const
+  {
+   MqlDateTime dt, m, w;
+   TimeToStruct(utc, dt);
+   m.year = dt.year; m.hour = 0; m.min = 0; m.sec = 0; m.day_of_week = 0; m.day_of_year = 0;
+   m.mon = 3; m.day = 31;
+   TimeToStruct(StructToTime(m), w);
+   const int marLastSun = 31 - w.day_of_week;
+   m.mon = 10; m.day = 31;
+   TimeToStruct(StructToTime(m), w);
+   const int octLastSun = 31 - w.day_of_week;
+   const int md = dt.mon * 100 + dt.day;
+   return(md >= 300 + marLastSun && md < 1000 + octLastSun);
+  }
+
+//+------------------------------------------------------------------+
+//| サーバー時間 → 現地時間（0 = 東京, 1 = ロンドン, 2 = ニューヨーク）       |
+//+------------------------------------------------------------------+
+datetime CModuleSet::LocalTime(const datetime serverTime, const int clock) const
+  {
+   const datetime utc = UTCTime(serverTime);
+   if(clock == 0)
+      return(utc + 9 * 3600);
+   if(clock == 1)
+      return(utc + (IsUKDST(utc) ? 3600 : 0));
+   return(utc - (IsUSDST(utc) ? 4 : 5) * 3600);
+  }
+
+//+------------------------------------------------------------------+
+//| 日の条件を満たすか（現地の日付で判定。ゴトー日は東京の日付）              |
+//+------------------------------------------------------------------+
+bool CModuleSet::RuleDayOK(const int filter, const datetime local, const int clock) const
+  {
+   MqlDateTime dt;
+   TimeToStruct(local, dt);
+   if(dt.day_of_week == 0 || dt.day_of_week == 6)
+      return(false);
+   if(filter == RULE_ALL)
+      return(true);
+   if(filter == RULE_GOTOBI)
+      return(IsGotobi(clock == 0 ? local : local));   // ゴトー日は東京の時計のルールで使う
+   if(filter >= RULE_DOW_BASE)
+      return(dt.day_of_week == filter - RULE_DOW_BASE);
+   //--- 月末＝その月の最終平日、月初＝最初の2平日
+   if(filter == RULE_MONTHEND)
+     {
+      for(int k = 1; k <= 3; k++)
+        {
+         MqlDateTime nx;
+         TimeToStruct(local + k * 86400, nx);
+         if(nx.mon != dt.mon)
+            return(true);
+         if(nx.day_of_week >= 1 && nx.day_of_week <= 5)
+            return(false);
+        }
+      return(false);
+     }
+   if(filter == RULE_MONTHSTART)
+     {
+      int weekdaysBefore = 0;
+      for(int d = 1; d < dt.day; d++)
+        {
+         MqlDateTime p;
+         TimeToStruct(local - (dt.day - d) * 86400, p);
+         if(p.day_of_week >= 1 && p.day_of_week <= 5)
+            weekdaysBefore++;
+        }
+      return(weekdaysBefore < 2);
+     }
+   return(false);
+  }
+
+//+------------------------------------------------------------------+
+//| 時刻ルールのシグナル：いまの足の始まりが、ルールの入る時刻と一致したら     |
+//+------------------------------------------------------------------+
+double CModuleSet::CalendarSignal(void)
+  {
+   m_pendRule = -1;
+   if(m_openTOD < 0 || m_ruleCount == 0)
+      return(0.0);
+   const datetime now = iTime(m_symbol, m_tf, 0);
+   for(int k = 0; k < m_ruleCount; k++)
+     {
+      const datetime local = LocalTime(now, m_ruleClock[k]);
+      MqlDateTime dt;
+      TimeToStruct(local, dt);
+      if(dt.hour * 100 + dt.min != m_ruleHHMM[k])
+         continue;
+      if(!RuleDayOK(m_ruleFilter[k], local, m_ruleClock[k]))
+         continue;
+      m_pendRule = k;
+      return((double)m_ruleDir[k]);
+     }
+   return(0.0);
   }
 
 #endif // AMS_MODULES_MQH

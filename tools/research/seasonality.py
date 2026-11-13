@@ -104,6 +104,24 @@ def window_returns(df: pd.DataFrame, hold: int, pip: float) -> np.ndarray:
     return out
 
 
+def rollover_mask(df: pd.DataFrame, hold: int) -> np.ndarray:
+    """保有する時間帯が、NY 16:00〜18:59（日付の変わり目＝スプレッドが大きく広がる時間）か、
+    週明けの最初の3時間にかかる取引を除外するための印（True = 除外）。
+    histdata は売値（Bid）だけなので、この時間帯はスプレッド拡大で見かけの値動きが出やすく、実際には取引できない。"""
+    ny_h = df["ny_h"].values
+    idx = df.index
+    bad = np.zeros(len(df), bool)
+    for k in range(hold):
+        h = (ny_h + k) % 24
+        bad |= (h >= 16) & (h <= 18)
+    gap = np.r_[np.inf, np.diff(idx.values).astype("timedelta64[h]").astype(float)]
+    week_open = gap >= 30
+    wo = np.zeros(len(df), bool)
+    for k in range(0, 3 + hold):
+        wo[k:] |= week_open[: len(df) - k] if k > 0 else week_open
+    return bad | wo
+
+
 def stats(x: np.ndarray, cost: float) -> dict:
     x = x[~np.isnan(x)]
     n = len(x)
@@ -126,13 +144,15 @@ def scan():
         m_des = D.period_mask(df.index, D.DESIGN)
         m_val = D.period_mask(df.index, D.VALID)
         rets = {h: window_returns(df, h, pip) for h in HOLDS}
+        excl = {h: rollover_mask(df, h) for h in HOLDS}
         for clock in CLOCKS:
             filters = day_filters(df, clock)
             hour = df[f"{clock}_h"].values
             for fname, fmask in filters.items():
                 for h0 in range(24):
-                    base = fmask & (hour == h0)
+                    base0 = fmask & (hour == h0)
                     for hold in HOLDS:
+                        base = base0 & ~excl[hold]
                         r = rets[hold]
                         des = stats(r[base & m_des], 0.0)
                         if des["n"] < 60 or abs(des["t"]) < 3.0:
@@ -166,7 +186,9 @@ def main():
              f"- 設計期間（2015〜2021年）で |t| ≥ 3 かつコスト込みでプラス：**{len(res)} 通り**",
              f"- そのうち、向きを固定したまま検証期間（2022年〜2024年10月）でも、コスト込みでプラス・PF 1.10 以上・t ≥ 1.5：**{len(passed)} 通り**",
              "- コスト（1取引、pips）：" + "、".join(f"{k} {v}" for k, v in COST.items()) + "（通常スプレッドの目安 + 不利な約定 0.5）",
-             "- 最終確認期間（2024年11月〜）は見ていません。", "",
+             "- 最終確認期間（2024年11月〜）は見ていません。",
+             "- NY 16:00〜18:59（日付の変わり目）と週明けの最初の3時間にかかる取引は除外しています。",
+             "  histdata は売値だけなので、この時間帯はスプレッド拡大による見かけの値動きが出やすく、実際には取引できないためです。", "",
              "## 検証期間も通った仮説", ""]
     if len(passed):
         lines += ["| 銘柄 | 時計 | 日の条件 | 入る時刻 | 保有 | 向き | 設計 回数 | 設計 平均pips | 設計 t | 設計 コスト後 | 検証 回数 | 検証 平均pips | 検証 t | 検証 コスト後 | 検証 PF |",
