@@ -1,0 +1,21 @@
+; AdaptiveMultiStrategyEA - calendar-rule portfolio (high risk), attach to a USDJPY M5 chart
+; Six time-of-day rules around the Tokyo fix (priority = order written):
+;  G3 USDJPY sell 9:55-12:00 on gotobi days      P2 EURJPY buy 9:25-9:55 on gotobi days
+;  P4 EURJPY buy 9:25-9:55 on Fridays            Q1 EURJPY sell 9:55-10:25 on gotobi days
+;  C3 EURJPY sell 10:00-11:00 on month-end       C4 GBPJPY sell 22:00-24:00 (Tokyo) on the first 2 weekdays
+InpEntryMode=6
+InpSymbols=USDJPY,EURJPY,GBPJPY
+InpTimeframe=5
+InpCalendarRules=G3:USDJPY,TKY,0955,125,SELL,GOTOBI,30/P2:EURJPY,TKY,0925,30,BUY,GOTOBI,20/P4:EURJPY,TKY,0925,30,BUY,FRI,20
+InpCalendarRules2=Q1:EURJPY,TKY,0955,30,SELL,GOTOBI,20/C3:EURJPY,TKY,1000,60,SELL,MONTHEND,25/C4:GBPJPY,TKY,2200,120,SELL,MONTHSTART,40
+InpCalendarRules3=
+InpEntryDelaySec=15
+InpRiskPercent=4.0
+InpMaxMarginUsePct=80.0
+InpMinLevelAfterSL=150.0
+InpMaxPositions=6
+InpMaxPerSymbol=1
+InpBETriggerATR=0.0
+InpTrailDistATR=0.0
+InpTPATR=0.0
+InpMaxDDStopPct=0.0
