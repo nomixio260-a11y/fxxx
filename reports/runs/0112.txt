@@ -1,0 +1,2 @@
+run=112 mode=backtest period=M5 model=1 exec=default from=2022.01.01 to=2024.11.01 symbols=EURUSD inputs=InpEntryMode=6;InpCalendarRules=R1:EURUSD,LDN,0900,240,SELL,ALL,25;InpRiskPercent=1;InpBETriggerATR=0;InpTrailDistATR=0;InpMaxDDStopPct=0
+RESULT net=0 | pf=0.00 | trades=0 | win=0(0.00%) | dd=0%(0)
