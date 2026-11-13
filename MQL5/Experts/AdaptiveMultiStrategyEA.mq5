@@ -187,6 +187,7 @@ public:
    datetime          pendUntil;       // この時刻を過ぎたら古いシグナルとして捨てる
    bool              pendSpreadWait;  // スプレッドが広くて待っているか（見送りの集計用）
    datetime          lastEntryTry;
+   bool              noLots;          // 直前の Open が「証拠金の余裕がなくロット0」で見送ったか
 
    //--- 保留中の決済（日付の変わり目など、市場が閉じていて決済できないときに再試行する）
    bool              pendCloseBuy;
@@ -197,13 +198,14 @@ public:
                      CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0),
                                            pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0), pendSLPips(0.0),
                                            pendSpreadWait(false),
-                                           pendUntil(0), lastEntryTry(0),
+                                           pendUntil(0), lastEntryTry(0), noLots(false),
                                            pendCloseBuy(false), pendCloseSell(false), pendCloseReason(""),
                                            lastExitTry(0) {}
 
    bool              Init(const string sym);
    void              Release(void) { regime.Release(); strategies.Release(); modules.Release(); }
-   void              OnTick(void);
+   void              OnTick(void);       // 段階1：週末前の決済・新しい足の判定・決済
+   void              OnTickEnter(void);  // 段階2：新規注文・ストップの管理（全銘柄の決済が済んでから）
    void              CloseAll(const string reason) { g_trade.SetTypeFillingBySymbol(symbol); risk.CloseAll(reason); }
    bool              WeekendCloseTime(void);
 
@@ -300,6 +302,17 @@ void CSymbolTrader::OnTick(void)
       OnBar();
    if(pendCloseBuy || pendCloseSell)
       TryClose();
+  }
+
+//+------------------------------------------------------------------+
+//| 段階2：新規注文とストップの管理。                                     |
+//| 同じ時刻に、別の銘柄の決済と新規が重なる場合（例：9:55 に EURJPY を決済し  |
+//| USDJPY を新規）、先に全銘柄の決済を済ませてから証拠金を計算するため、      |
+//| ProcessAll で全銘柄の OnTick のあとに呼ぶ。                            |
+//+------------------------------------------------------------------+
+void CSymbolTrader::OnTickEnter(void)
+  {
+   g_trade.SetTypeFillingBySymbol(symbol);
    if(pendDir != 0)
       TryEnter();
 
@@ -496,11 +509,15 @@ void CSymbolTrader::TryEnter(void)
 
    const int dir = pendDir;
    pendDir = 0;   // 注文は1回だけ試みる（Open の中で、一時的なエラーには再試行する）
+   noLots  = false;
    if(Open(dir > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, pendReg, pendTag, pendMul))
      {
       if(InpEntryMode != ENTRY_WEIGHTED)
          modules.MarkEntered();
      }
+   else
+      if(noLots)
+         pendDir = dir;   // 証拠金の余裕がないだけなら、ほかの決済を待って期限まで再試行する（期限切れは skip_other）
   }
 
 //+------------------------------------------------------------------+
@@ -576,6 +593,7 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
       const double lots = risk.CalcLots(type, entry, sl, riskMul);
       if(lots <= 0.0)
         {
+         noLots = true;
          if(InpVerbose)
             PrintFormat("[AMS] %s ロットが最小ロット未満（または証拠金不足）のため見送り", symbol);
          return(false);
@@ -845,6 +863,8 @@ void ProcessAll(void)
 
    for(int i = 0; i < ArraySize(g_traders); i++)
       g_traders[i].OnTick();
+   for(int i = 0; i < ArraySize(g_traders); i++)
+      g_traders[i].OnTickEnter();
   }
 
 //+------------------------------------------------------------------+
