@@ -158,6 +158,10 @@ jobs:
           {
             echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} inputs=${BT_INPUTS:-default}"
             cat reports/result_line.txt 2>/dev/null || echo "RESULT なし（テスト失敗）"
+            # 月ごとの損益率（モンテカルロ分析などに使う）："MONTHLY 2015-01:+1.23,2015-02:-0.45,..."
+            if [ -f reports/AMS_monthly.csv ]; then
+              awk -F, 'NR>1 && NF>=4 { gsub(/\r/, "", $4); printf "%s%s:%s", (n++ ? "," : "MONTHLY "), $1, $4 } END { if (n) print "" }' reports/AMS_monthly.csv
+            fi
             if [ "${BT_SAMPLE:-}" = "1" ]; then cat reports/trade_sample.txt 2>/dev/null || true; fi
           } > "$out"
           cat "$out"
