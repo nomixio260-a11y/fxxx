@@ -134,6 +134,8 @@ input double           InpTrailStartATR     = 1.5;         // 含み益が ATR×
 input double           InpTrailDistATR      = 1.0;         // トレーリング幅 ATR×この値（0で無効）
 input double           InpTrailStepPips     = 1.0;         // SLを動かす最小幅（pips）
 input double           InpMaxDailyLossPct   = 15.0;        // 1日の損失上限（%、0で無効）
+input double           InpDDRiskCutPct      = 0.0;         // 最高値からの下落がこの%を超えているあいだは、リスクを下の倍率にする（0で無効）
+input double           InpDDRiskMul         = 0.5;         // 上の条件のときのリスクの倍率
 input double           InpMaxDDStopPct      = 50.0;        // 最高値からの下落がこの%を超えたら全決済して停止（0で無効）
 input double           InpMaxMarginUsePct   = 40.0;        // 必要証拠金の合計の上限（有効証拠金の%。強制ロスカット防止）
 input double           InpMinLevelAfterSL   = 150.0;       // すべての建玉が損切りに達しても残す証拠金維持率（%。OANDA のロスカットは100%）
@@ -537,7 +539,12 @@ void CSymbolTrader::TryEnter(void)
    const int dir = pendDir;
    pendDir = 0;   // 注文は1回だけ試みる（Open の中で、一時的なエラーには再試行する）
    noLots  = false;
-   if(Open(dir > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, pendReg, pendTag, pendMul))
+   //--- 最高値から大きく下落しているあいだは、リスクを小さくする（DD を深くしないため）
+   double mul = pendMul;
+   if(InpDDRiskCutPct > 0.0 && g_peakEquity > 0.0 &&
+      AccountInfoDouble(ACCOUNT_EQUITY) < g_peakEquity * (1.0 - InpDDRiskCutPct / 100.0))
+      mul *= InpDDRiskMul;
+   if(Open(dir > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, pendReg, pendTag, mul))
      {
       if(InpEntryMode != ENTRY_WEIGHTED)
          modules.MarkEntered();
