@@ -526,6 +526,10 @@ void CSymbolTrader::TryEnter(void)
    //    全銘柄の足がそろうまで少し待ってから、優先順位の順に注文する（ProcessAll で並べ替える）
    if(InpEntryMode == ENTRY_CALENDAR && InpEntryDelaySec > 0 && TimeCurrent() < pendBarTime + InpEntryDelaySec)
       return;
+   //--- 優先順位の高いルールが保留中（スプレッドの戻り待ちなど）のあいだは、低いルールは待つ
+   //    （先に入ると、高いルールの証拠金の余裕を使ってしまうため）
+   if(InpEntryMode == ENTRY_CALENDAR && pendPrio > g_minPendPrio)
+      return;
    if(TimeCurrent() - lastEntryTry < 5)
       return;
    lastEntryTry = TimeCurrent();
@@ -653,6 +657,7 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
 // グローバル
 //==================================================================
 CSymbolTrader *g_traders[];
+int            g_minPendPrio = 1000000;   // 保留中のシグナルのうち、最も高い優先順位（時刻ルール）
 
 //+------------------------------------------------------------------+
 int CountAllPositions(void)
@@ -903,6 +908,7 @@ void ProcessAll(void)
         }
       order[j + 1] = v;
      }
+   g_minPendPrio = (n > 0) ? g_traders[order[0]].PendingPrio() : 1000000;
    for(int i = 0; i < n; i++)
       g_traders[order[i]].OnTickEnter();
   }
