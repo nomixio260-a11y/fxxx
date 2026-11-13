@@ -171,6 +171,13 @@ if (Test-Path "$out\tester_last.log") {
     $x = $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 '
     if ($x.Length -gt 150) { $x.Substring(0, 150) } else { $x }
   })
+  # 見送りの理由（最初の40件）
+  $skip = @($tl | Where-Object { $_ -match '\[AMS\] 見送り' })
+  $lines += "SKIPS total=$($skip.Count)"
+  $lines += ($skip | Select-Object -First 40 | ForEach-Object {
+    $x = $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 '
+    if ($x.Length -gt 150) { $x.Substring(0, 150) } else { $x }
+  })
   $lines | Out-File "$out\trade_sample.txt" -Encoding utf8
 }
 

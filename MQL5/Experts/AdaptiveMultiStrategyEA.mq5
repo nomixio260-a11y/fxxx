@@ -462,11 +462,21 @@ void CSymbolTrader::TryEnter(void)
    if(g_halted || TimeCurrent() > pendUntil || WeekendCloseTime() ||
       !WithinTradingHours(InpStartHour, InpEndHour) || risk.DailyLossHit())
      {
+      string why = "";
+      if(g_halted)                                         why = "停止中";
+      else if(TimeCurrent() > pendUntil && pendSpreadWait) why = "スプレッド拡大のまま期限切れ";
+      else if(TimeCurrent() > pendUntil && noLots)         why = "証拠金の余裕がないまま期限切れ";
+      else if(TimeCurrent() > pendUntil)                   why = "期限切れ";
+      else if(WeekendCloseTime())                          why = "週末前";
+      else if(!WithinTradingHours(InpStartHour, InpEndHour)) why = "取引時間外";
+      else                                                 why = "日次損失の上限";
+      PrintFormat("[AMS] 見送り %s [%s] 理由=%s", symbol, pendTag, why);
       if(pendSpreadWait && TimeCurrent() > pendUntil)
          g_sigSpread++;
       else
          g_sigOther++;
       pendDir = 0;
+      noLots  = false;
       return;
      }
    //--- 決済待ちのポジションがあるあいだは、新規エントリーを待つ
@@ -477,6 +487,7 @@ void CSymbolTrader::TryEnter(void)
    if(buys + sells >= InpMaxPerSymbol || CountAllPositions() >= InpMaxPositions ||
       (pendDir > 0 && buys > 0) || (pendDir < 0 && sells > 0))
      {
+      PrintFormat("[AMS] 見送り %s [%s] 理由=建玉あり（この銘柄 %d / 全体 %d）", symbol, pendTag, buys + sells, CountAllPositions());
       pendDir = 0;
       return;
      }
