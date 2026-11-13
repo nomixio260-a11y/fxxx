@@ -19,6 +19,11 @@ import data as D  # noqa: E402
 import seasonality as S  # noqa: E402
 
 
+# 2回目：NY のオプションカット（NY 10:00）と、ロンドンの寄り付き（8:00）
+EVENTS2 = (("ny", 10, 0, "NYカット"), ("ldn", 8, 0, "ロンドン寄り付き"))
+SECOND = len(sys.argv) > 1 and sys.argv[1] == "2"
+
+
 def st(x):
     x = np.asarray(x, float)
     x = x[~np.isnan(x)]
@@ -39,8 +44,9 @@ def main():
         cost = S.COST[pair]
         h1 = D.bars(pair, "1h")
         rng = (h1["h"] - h1["l"]).rolling(24).mean().shift(1)
-        for hh, mm, name in ((13, 15, "ECB"), (16, 0, "WM/R")):
-            fix = df.index[(df["ldn_h"].values == hh) & (df["ldn_m"].values == mm)]
+        events = EVENTS2 if SECOND else (("ldn", 13, 15, "ECB"), ("ldn", 16, 0, "WM/R"))
+        for clock, hh, mm, name in events:
+            fix = df.index[(df[f"{clock}_h"].values == hh) & (df[f"{clock}_m"].values == mm)]
             p = lambda t: o.reindex(t).values  # noqa: E731
             a = rng.reindex(fix.floor("1h")).values / pip
             des = D.period_mask(fix, D.DESIGN)
@@ -67,7 +73,7 @@ def main():
             out.append("")
     out = ["# 候補（設計 t ≥ 3、検証でコスト後プラス・PF ≥ 1.2）", ""] + (hits or ["なし"]) + [""] + out
     text = "\n".join(out)
-    open(os.path.join(D.ROOT, "reports", "research", "fix_reversal_eu.md"), "w", encoding="utf-8").write(text + "\n")
+    open(os.path.join(D.ROOT, "reports", "research", "fix_reversal_eu2.md" if SECOND else "fix_reversal_eu.md"), "w", encoding="utf-8").write(text + "\n")
     print("\n".join(out[:len(hits) + 4]))
 
 
