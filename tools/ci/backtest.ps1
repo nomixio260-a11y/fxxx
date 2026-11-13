@@ -26,7 +26,12 @@ if ($env:BT_SYMBOLS) { $inputLines += "InpSymbols=$($env:BT_SYMBOLS)" }
 # BT_INPUTS: 「名前=値;名前=値」で任意の入力を固定値にする
 if ($env:BT_INPUTS) {
   foreach ($kv in ($env:BT_INPUTS -split ';')) {
-    if ($kv -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$') { $inputLines += "$($matches[1])=$($matches[2])||$($matches[2])||0||$($matches[2])||N" }
+    if ($kv -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$') {
+      $k = $matches[1]; $v = $matches[2]
+      # 数値・true/false は「値||開始||刻み||終了||N」、文字列は「名前=値」だけを書く（|| が値の一部として扱われるため）
+      if ($v -match '^-?[0-9.]+$' -or $v -match '^(true|false)$') { $inputLines += "$k=$v||$v||0||$v||N" }
+      else { $inputLines += "$k=$v" }
+    }
   }
 }
 
