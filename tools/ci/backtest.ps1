@@ -165,7 +165,7 @@ if (Test-Path "$out\tester_last.log") {
   $tpN = @($tl | Where-Object { $_ -match 'take profit triggered' }).Count
   $eaN = @($tl | Where-Object { $_ -match '\[AMS\] 決済 #' }).Count
   $soN = @($tl | Where-Object { $_ -match 'stop out' }).Count
-  $ev  = @($tl | Where-Object { $_ -match '\[AMS\] \S+ (BUY|SELL) |stop loss triggered|take profit triggered|\[AMS\] 決済 #|週明け|エントリーの方式|DD上限|下落したため' })
+  $ev  = @($tl | Where-Object { $_ -match '\[AMS\] \S+ (BUY|SELL) |stop loss triggered|take profit triggered|\[AMS\] 決済 #|週明け|エントリーの方式|DD上限|下落したため|自動調整' })
   $lines = @("SAMPLE sl_hit=$slN tp_hit=$tpN closed_by_ea=$eaN stop_out=$soN")
   $lines += ($ev | Select-Object -First 48 | ForEach-Object {
     $x = $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 '

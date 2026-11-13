@@ -51,6 +51,9 @@ input double           InpFixMaxSpreadPips  = 1.5;         // [東京仲値] ス
 input string           InpCalendarRules     = "";          // [時刻ルール] "名前:銘柄|時計|HHMM|保有分|BUY/SELL|日の条件|SLpips" を ; で区切る
 input string           InpCalendarRules2    = "";          // [時刻ルール] 続き（テスターの入力は1つ255文字までのため、分けて書ける）
 input string           InpCalendarRules3    = "";          // [時刻ルール] 続き
+input int              InpAdaptWindow       = 0;           // [自動調整] 直近何回の仮想取引の成績で、ルールを止める/再開するか（0で無効）
+input int              InpAdaptMinTrades    = 20;          // [自動調整] この回数に満たないルールは止めない
+input double           InpAdaptMinPF        = 1.0;         // [自動調整] 直近の PF（コスト後）がこれ未満のルールは止める
 input int              InpEntryDelaySec     = 15;          // [時刻ルール] 足の始まりから注文までの待ち（秒）。全銘柄の足がそろってから優先順に注文する
 input string           InpJPHolidays        = "";          // [東京仲値] 追加の休業日（例 2027.01.01,2027.01.11。2015〜2026年は内蔵）
 
@@ -214,6 +217,8 @@ public:
    void              OnTick(void);       // 段階1：週末前の決済・新しい足の判定・決済
    void              OnTickEnter(void);  // 段階2：新規注文・ストップの管理（全銘柄の決済が済んでから）
    int               PendingPrio(void) const { return(pendDir != 0 ? pendPrio : 1000000); }
+   int               AdaptSkips(void) const { return(modules.AdaptSkips()); }
+   void              AdaptiveReport(void) const { modules.AdaptiveReport(); }
    void              CloseAll(const string reason) { g_trade.SetTypeFillingBySymbol(symbol); risk.CloseAll(reason); }
    bool              WeekendCloseTime(void);
 
@@ -257,6 +262,7 @@ bool CSymbolTrader::Init(const string sym)
          PrintFormat("[AMS] %s に当てはまる時刻ルールがないため、この銘柄は取引しません", sym);
          return(false);
         }
+      modules.SetAdaptive(InpEntryMode == ENTRY_CALENDAR ? InpAdaptWindow : 0, InpAdaptMinTrades, InpAdaptMinPF);
       //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
       const int tod = modules.OpenTOD();
       if(tod >= 0)
@@ -1055,6 +1061,15 @@ void ReportBreakdown(void)
       FileWrite(fh, "signal", "skip_spread", g_sigSpread, 0, "", "0");
       FileWrite(fh, "signal", "skip_other", g_sigOther, 0, "", "0");
      }
+   //--- 自動調整：止めていたために見送ったシグナルの数と、ルールごとの状態
+   int adaptSkips = 0;
+   for(int i = 0; i < ArraySize(g_traders); i++)
+     {
+      adaptSkips += g_traders[i].AdaptSkips();
+      g_traders[i].AdaptiveReport();
+     }
+   if(fh != INVALID_HANDLE)
+      FileWrite(fh, "signal", "skip_adapt", adaptSkips, 0, "", "0");
    Print("[AMS] ===== 銘柄別・相場状況別・ロジック別の成績 =====");
    WriteStats(fh, "symbol", sN, sT, sW, sP);
    WriteStats(fh, "regime", rN, rT, rW, rP);

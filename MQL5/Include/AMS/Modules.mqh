@@ -95,6 +95,27 @@ private:
    string            m_ruleName[];
    int               m_rulePrio[];    // 優先順位（入力に書いた順。小さいほど先に注文する）
    int               m_pendRule;      // シグナルを出したルール（エントリー待ち）
+   //--- 自動調整：ルールごとに「仮想の取引」を記録し、直近の成績が悪いルールは自動で止める（成績が戻れば再開）
+   int               m_adWin;         // 直近何回の仮想取引で判断するか（0 = 自動調整なし）
+   int               m_adMin;         // この回数に満たないうちは止めない
+   double            m_adMinPF;       // 直近の PF（コスト後）がこれ未満なら止める
+   int               m_adSkips;       // 自動調整で見送ったシグナルの数
+   bool              m_vOpen[];       // 仮想の取引を保有中か
+   int               m_vDir[];
+   double            m_vEntry[];
+   double            m_vSLpips[];
+   double            m_vSpread[];     // 入った時点のスプレッド（pips）＝コスト
+   datetime          m_vUntil[];
+   double            m_vRes[];        // 結果（pips、コスト後）。ルール k の i 番目は k*m_adWin + i（輪のように上書き）
+   int               m_vCnt[];        // 記録した回数（累計）
+   bool              m_ruleOn[];      // いまの状態（ログの変化の表示用）
+   double            RuleSL(const int k) const;
+   bool              RuleEnabled(const int k) const;
+   double            RulePF(const int k, int &n) const;
+   void              UpdateVirtual(void);
+   void              OpenVirtual(const int k);
+   void              SaveAdaptive(void) const;
+   void              LoadAdaptive(void);
    int               m_activeRule;    // 保有中のポジションのルール
    datetime          m_activeUntil;   // 保有中のポジションを決済する時刻（サーバー時間）
 
@@ -134,6 +155,9 @@ public:
    void              AddHolidays(const string list);
    int               SetRules(const string rules);
    double            PendingRuleSL(void) const;
+   void              SetAdaptive(const int window, const int minTrades, const double minPF);
+   int               AdaptSkips(void) const { return(m_adSkips); }
+   void              AdaptiveReport(void) const;
    double            H1RangePips(void) const;
    bool              PreMoveOK(const int minutes, const double thr, const bool below) const;
    string            PendingRuleName(void) const { return(m_pendRule >= 0 ? m_ruleName[m_pendRule] : ""); }
@@ -169,6 +193,10 @@ CModuleSet::CModuleSet(void) : m_symbol(""),
                                m_fixDir(1),
                                m_ruleCount(0),
                                m_pendRule(-1),
+                               m_adWin(0),
+                               m_adMin(20),
+                               m_adMinPF(1.0),
+                               m_adSkips(0),
                                m_activeRule(-1),
                                m_activeUntil(0)
   {
@@ -681,6 +709,17 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_rulePreBelow, m_ruleCount);
       ArrayResize(m_ruleName, m_ruleCount);
       ArrayResize(m_rulePrio, m_ruleCount);
+      ArrayResize(m_vOpen, m_ruleCount);
+      ArrayResize(m_vDir, m_ruleCount);
+      ArrayResize(m_vEntry, m_ruleCount);
+      ArrayResize(m_vSLpips, m_ruleCount);
+      ArrayResize(m_vSpread, m_ruleCount);
+      ArrayResize(m_vUntil, m_ruleCount);
+      ArrayResize(m_vCnt, m_ruleCount);
+      ArrayResize(m_ruleOn, m_ruleCount);
+      m_vOpen[k] = false;
+      m_vCnt[k]  = 0;
+      m_ruleOn[k] = true;
       m_ruleClock[k]  = clock;
       m_ruleHHMM[k]   = (int)StringToInteger(f[2]);
       m_ruleHold[k]   = (int)StringToInteger(f[3]);
@@ -819,7 +858,9 @@ double CModuleSet::CalendarSignal(void)
    m_pendRule = -1;
    if(m_openTOD < 0 || m_ruleCount == 0)
       return(0.0);
+   UpdateVirtual();
    const datetime now = iTime(m_symbol, m_tf, 0);
+   double signal = 0.0;
    for(int k = 0; k < m_ruleCount; k++)
      {
       const datetime local = LocalTime(now, m_ruleClock[k]);
@@ -831,10 +872,19 @@ double CModuleSet::CalendarSignal(void)
          continue;
       if(m_rulePreMin[k] > 0 && !PreMoveOK(m_rulePreMin[k], m_rulePreThr[k], m_rulePreBelow[k]))
          continue;
+      //--- 自動調整：実際に注文するかどうかに関係なく、仮想の取引は記録し続ける
+      OpenVirtual(k);
+      if(signal != 0.0)
+         continue;
+      if(!RuleEnabled(k))
+        {
+         m_adSkips++;
+         continue;
+        }
       m_pendRule = k;
-      return((double)m_ruleDir[k]);
+      signal = (double)m_ruleDir[k];
      }
-   return(0.0);
+   return(signal);
   }
 
 //+------------------------------------------------------------------+
@@ -890,16 +940,199 @@ double CModuleSet::H1RangePips(void) const
 //+------------------------------------------------------------------+
 double CModuleSet::PendingRuleSL(void) const
   {
-   if(m_pendRule < 0)
-      return(0.0);
-   double sl = m_ruleSL[m_pendRule];
-   if(m_ruleSLk[m_pendRule] > 0.0)
+   return(m_pendRule >= 0 ? RuleSL(m_pendRule) : 0.0);
+  }
+
+double CModuleSet::RuleSL(const int k) const
+  {
+   double sl = m_ruleSL[k];
+   if(m_ruleSLk[k] > 0.0)
      {
       const double r = H1RangePips();
       if(r > 0.0)
-         sl = MathMin(sl, MathMax(5.0, m_ruleSLk[m_pendRule] * r));
+         sl = MathMin(sl, MathMax(5.0, m_ruleSLk[k] * r));
      }
    return(sl);
+  }
+
+//+------------------------------------------------------------------+
+//| 自動調整の設定。window = 0 なら無効                                   |
+//+------------------------------------------------------------------+
+void CModuleSet::SetAdaptive(const int window, const int minTrades, const double minPF)
+  {
+   m_adWin   = MathMax(window, 0);
+   m_adMin   = MathMax(minTrades, 1);
+   m_adMinPF = minPF;
+   ArrayResize(m_vRes, MathMax(m_ruleCount * m_adWin, 1));
+   ArrayInitialize(m_vRes, 0.0);
+   if(m_adWin > 0 && !MQLInfoInteger(MQL_TESTER))
+      LoadAdaptive();
+  }
+
+//+------------------------------------------------------------------+
+//| ルール k の直近の仮想取引の PF（コスト後）。n に使った回数を返す        |
+//+------------------------------------------------------------------+
+double CModuleSet::RulePF(const int k, int &n) const
+  {
+   n = MathMin(m_vCnt[k], m_adWin);
+   double gp = 0.0, gl = 0.0;
+   for(int i = 0; i < n; i++)
+     {
+      const double v = m_vRes[k * m_adWin + i];
+      if(v > 0.0)
+         gp += v;
+      else
+         gl -= v;
+     }
+   return(gl > 0.0 ? gp / gl : (gp > 0.0 ? 99.0 : 0.0));
+  }
+
+bool CModuleSet::RuleEnabled(const int k) const
+  {
+   if(m_adWin <= 0 || m_vCnt[k] < m_adMin)
+      return(true);
+   int n = 0;
+   return(RulePF(k, n) >= m_adMinPF);
+  }
+
+//+------------------------------------------------------------------+
+//| 仮想の取引を始める（いまの足の始値で、ルールの向きに）                  |
+//+------------------------------------------------------------------+
+void CModuleSet::OpenVirtual(const int k)
+  {
+   if(m_adWin <= 0 || m_vOpen[k])
+      return;
+   const double pip = PipSize(m_symbol);
+   const double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+   const double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
+   m_vOpen[k]   = true;
+   m_vDir[k]    = m_ruleDir[k];
+   m_vEntry[k]  = iOpen(m_symbol, m_tf, 0);
+   m_vSLpips[k] = RuleSL(k);
+   m_vSpread[k] = (pip > 0.0 && ask > bid) ? (ask - bid) / pip : 0.0;
+   m_vUntil[k]  = iTime(m_symbol, m_tf, 0) + m_ruleHold[k] * 60;
+  }
+
+//+------------------------------------------------------------------+
+//| 新しい足ごとに、保有中の仮想取引を進める（損切り・時間での決済）          |
+//+------------------------------------------------------------------+
+void CModuleSet::UpdateVirtual(void)
+  {
+   if(m_adWin <= 0)
+      return;
+   const double   pip = PipSize(m_symbol);
+   const datetime now = iTime(m_symbol, m_tf, 0);
+   bool changed = false;
+   for(int k = 0; k < m_ruleCount; k++)
+     {
+      if(!m_vOpen[k] || pip <= 0.0)
+         continue;
+      double res = 0.0;
+      bool   done = false;
+      //--- 直前の確定足で損切りに当たったか
+      const double hi = iHigh(m_symbol, m_tf, 1), lo = iLow(m_symbol, m_tf, 1);
+      const double adverse = (m_vDir[k] > 0) ? (m_vEntry[k] - lo) / pip : (hi - m_vEntry[k]) / pip;
+      if(iTime(m_symbol, m_tf, 1) >= m_vUntil[k] - m_ruleHold[k] * 60 && adverse >= m_vSLpips[k] && m_vSLpips[k] > 0.0)
+        {
+         res  = -m_vSLpips[k];
+         done = true;
+        }
+      else
+         if(now >= m_vUntil[k])
+           {
+            res  = m_vDir[k] * (iOpen(m_symbol, m_tf, 0) - m_vEntry[k]) / pip;
+            done = true;
+           }
+      if(!done)
+         continue;
+      res -= m_vSpread[k];
+      m_vRes[k * m_adWin + (m_vCnt[k] % m_adWin)] = res;
+      m_vCnt[k]++;
+      m_vOpen[k] = false;
+      changed = true;
+      const bool on = RuleEnabled(k);
+      if(on != m_ruleOn[k])
+        {
+         int n = 0;
+         const double pf = RulePF(k, n);
+         PrintFormat("[AMS] 自動調整：%s のルール %s を%s（直近 %d 回の PF %.2f）", m_symbol, m_ruleName[k],
+                     on ? "再開します" : "止めます", n, pf);
+         m_ruleOn[k] = on;
+        }
+     }
+   if(changed && !MQLInfoInteger(MQL_TESTER))
+      SaveAdaptive();
+  }
+
+//+------------------------------------------------------------------+
+//| 実運用：仮想取引の記録をファイルに保存・読み込み（再起動しても続くように） |
+//+------------------------------------------------------------------+
+void CModuleSet::SaveAdaptive(void) const
+  {
+   const int fh = FileOpen("AMS_adapt_" + m_symbol + ".csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fh == INVALID_HANDLE)
+      return;
+   for(int k = 0; k < m_ruleCount; k++)
+     {
+      string vals = "";
+      const int n = MathMin(m_vCnt[k], m_adWin);
+      for(int i = 0; i < n; i++)
+        {
+         //--- 古い順に並べて保存する
+         const int idx = (m_vCnt[k] >= m_adWin) ? (m_vCnt[k] + i) % m_adWin : i;
+         vals += (i ? ";" : "") + DoubleToString(m_vRes[k * m_adWin + idx], 2);
+        }
+      FileWrite(fh, m_ruleName[k], vals);
+     }
+   FileClose(fh);
+  }
+
+void CModuleSet::LoadAdaptive(void)
+  {
+   const int fh = FileOpen("AMS_adapt_" + m_symbol + ".csv", FILE_READ | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fh == INVALID_HANDLE)
+      return;
+   while(!FileIsEnding(fh))
+     {
+      const string name = FileReadString(fh);
+      const string vals = FileReadString(fh);
+      for(int k = 0; k < m_ruleCount; k++)
+        {
+         if(m_ruleName[k] != name)
+            continue;
+         string parts[];
+         const int n = StringSplit(vals, ';', parts);
+         m_vCnt[k] = 0;
+         for(int i = 0; i < n; i++)
+           {
+            if(parts[i] == "")
+               continue;
+            m_vRes[k * m_adWin + (m_vCnt[k] % m_adWin)] = StringToDouble(parts[i]);
+            m_vCnt[k]++;
+           }
+         m_ruleOn[k] = RuleEnabled(k);
+         int c = 0;
+         PrintFormat("[AMS] 自動調整：%s のルール %s の記録を読み込みました（%d 回、PF %.2f、%s）", m_symbol, name,
+                     m_vCnt[k], RulePF(k, c), m_ruleOn[k] ? "有効" : "停止中");
+        }
+     }
+   FileClose(fh);
+  }
+
+//+------------------------------------------------------------------+
+//| バックテストの終わりに、ルールごとの仮想取引の成績を出す                 |
+//+------------------------------------------------------------------+
+void CModuleSet::AdaptiveReport(void) const
+  {
+   if(m_adWin <= 0)
+      return;
+   for(int k = 0; k < m_ruleCount; k++)
+     {
+      int n = 0;
+      const double pf = RulePF(k, n);
+      PrintFormat("[AMS] 自動調整の状態：%s %s 仮想取引 %d 回、直近 %d 回の PF %.2f、%s", m_symbol, m_ruleName[k],
+                  m_vCnt[k], n, pf, RuleEnabled(k) ? "有効" : "停止中");
+     }
   }
 
 #endif // AMS_MODULES_MQH
