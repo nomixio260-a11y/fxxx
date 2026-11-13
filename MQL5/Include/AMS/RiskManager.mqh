@@ -24,6 +24,7 @@ private:
    double            m_maxDailyLossPct;  // 1日の損失上限（%）。0で無効
    bool              m_allowMinLot;      // 計算ロットが最小ロット未満でも最小ロットで入るか
    double            m_maxMarginPct;     // 口座全体の必要証拠金の上限（有効証拠金の%）
+   double            m_minLevelAfterSL;  // すべての建玉が損切りに達しても残す証拠金維持率（%）
    int               m_dayKey;           // 日付（YYYYMMDD）
    double            m_dayStartEquity;
 
@@ -35,7 +36,8 @@ public:
 
    void              Init(const string symbol, const ulong magic, CTrade *trade,
                           const double riskPct, const double maxDailyLossPct, const bool allowMinLot,
-                          const double maxMarginPct = 40.0);
+                          const double maxMarginPct = 40.0, const double minLevelAfterSL = 150.0);
+   double            OpenLossToSL(void) const;
 
    //--- 資金管理
    void              UpdateDay(void);
@@ -62,6 +64,7 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
                                    m_maxDailyLossPct(3.0),
                                    m_allowMinLot(false),
                                    m_maxMarginPct(40.0),
+                                   m_minLevelAfterSL(150.0),
                                    m_dayKey(0),
                                    m_dayStartEquity(0.0)
   {
@@ -70,7 +73,7 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
 //+------------------------------------------------------------------+
 void CRiskManager::Init(const string symbol, const ulong magic, CTrade *trade,
                         const double riskPct, const double maxDailyLossPct, const bool allowMinLot,
-                        const double maxMarginPct)
+                        const double maxMarginPct, const double minLevelAfterSL)
   {
    m_symbol          = symbol;
    m_magic           = magic;
@@ -79,6 +82,7 @@ void CRiskManager::Init(const string symbol, const ulong magic, CTrade *trade,
    m_maxDailyLossPct = maxDailyLossPct;
    m_allowMinLot     = allowMinLot;
    m_maxMarginPct    = maxMarginPct;
+   m_minLevelAfterSL = minLevelAfterSL;
    m_dayKey          = 0;
    UpdateDay();
   }
@@ -171,13 +175,62 @@ double CRiskManager::CalcLots(const ENUM_ORDER_TYPE type, const double entry, co
    const double used       = AccountInfoDouble(ACCOUNT_MARGIN);
    const double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    double budget = equity * m_maxMarginPct / 100.0 - used;
-   if(budget > freeMargin * 0.5)
-      budget = freeMargin * 0.5;
+   if(budget > freeMargin)
+      budget = freeMargin;
    if(budget <= 0.0)
       return(0.0);
    if(margin > budget)
       lots = NormalizeVolume(lots * budget / margin);
+   if(lots <= 0.0)
+      return(0.0);
+   //--- ロスカット（証拠金維持率100%）への余裕：すべての建玉（この取引を含む）が損切りに達しても、
+   //    維持率が m_minLevelAfterSL% 以上残るロットまでに抑える
+   //    (equity - 既存の損切りまでの損失 - l1*x) >= k * (used + m1*x)  →  x <= (equity - Lx - k*used) / (l1 + k*m1)
+   if(m_minLevelAfterSL > 0.0)
+     {
+      const double k  = m_minLevelAfterSL / 100.0;
+      const double m1 = margin / MathMax(NormalizeVolume(riskMoney / lossPerLot), 1e-9);
+      const double room = equity - OpenLossToSL() - k * used;
+      if(room <= 0.0)
+         return(0.0);
+      const double xmax = room / (lossPerLot + k * m1);
+      if(lots > xmax)
+         lots = NormalizeVolume(xmax);
+     }
    return(lots);
+  }
+
+//+------------------------------------------------------------------+
+//| 口座のすべての建玉が損切りに達したときの損失の合計（SL がない建玉は、    |
+//| 安全のため必要証拠金の全額を損失とみなす）                             |
+//+------------------------------------------------------------------+
+double CRiskManager::OpenLossToSL(void) const
+  {
+   double total = 0.0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      const ulong ticket = PositionGetTicket(i);
+      if(ticket == 0)
+         continue;
+      const string sym  = PositionGetString(POSITION_SYMBOL);
+      const double vol  = PositionGetDouble(POSITION_VOLUME);
+      const double sl   = PositionGetDouble(POSITION_SL);
+      const double cur  = PositionGetDouble(POSITION_PRICE_CURRENT);
+      const ENUM_ORDER_TYPE t = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      double pl = 0.0;
+      if(sl > 0.0 && OrderCalcProfit(t, sym, vol, cur, sl, pl))
+        {
+         if(pl < 0.0)
+            total -= pl;
+        }
+      else
+        {
+         double mg = 0.0;
+         if(OrderCalcMargin(t, sym, vol, cur, mg))
+            total += mg;
+        }
+     }
+   return(total);
   }
 
 //+------------------------------------------------------------------+

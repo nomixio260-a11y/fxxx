@@ -133,6 +133,7 @@ input double           InpTrailStepPips     = 1.0;         // SLを動かす最�
 input double           InpMaxDailyLossPct   = 15.0;        // 1日の損失上限（%、0で無効）
 input double           InpMaxDDStopPct      = 50.0;        // 最高値からの下落がこの%を超えたら全決済して停止（0で無効）
 input double           InpMaxMarginUsePct   = 40.0;        // 必要証拠金の合計の上限（有効証拠金の%。強制ロスカット防止）
+input double           InpMinLevelAfterSL   = 150.0;       // すべての建玉が損切りに達しても残す証拠金維持率（%。OANDA のロスカットは100%）
 
 input group "=== フィルター ==="
 input double           InpMaxSpreadATR      = 0.25;        // スプレッドが ATR×この値を超えたら見送り（0で無効）
@@ -232,7 +233,7 @@ bool CSymbolTrader::Init(const string sym)
                        InpStochK, InpStochD, InpStochSlowing))
       return(false);
    risk.Init(sym, InpMagic, GetPointer(g_trade), InpRiskPercent, InpMaxDailyLossPct, InpAllowMinLot,
-             InpMaxMarginUsePct);
+             InpMaxMarginUsePct, InpMinLevelAfterSL);
    if(InpEntryMode != ENTRY_WEIGHTED)
      {
       if(!modules.Init(sym, InpTimeframe, InpEntryMode, InpDTEntryDays, InpDTExitDays,
