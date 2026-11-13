@@ -84,6 +84,8 @@ private:
    int               m_ruleDir[];     // +1 買い / -1 売り
    int               m_ruleFilter[];  // 日の条件（下の RULE_* ）
    double            m_ruleSL[];      // SL（pips）
+   int               m_rulePreMin[];  // 直前の値動きの条件：何分前からの値動きを見るか（0 = 条件なし）
+   double            m_rulePreThr[];  // その値動き（1時間足の平均値幅で割った値）がこれより大きいときだけ入る
    string            m_ruleName[];
    int               m_rulePrio[];    // 優先順位（入力に書いた順。小さいほど先に注文する）
    int               m_pendRule;      // シグナルを出したルール（エントリー待ち）
@@ -126,6 +128,7 @@ public:
    void              AddHolidays(const string list);
    int               SetRules(const string rules);
    double            PendingRuleSL(void) const { return(m_pendRule >= 0 ? m_ruleSL[m_pendRule] : 0.0); }
+   bool              PreMoveOK(const int minutes, const double thr) const;
    string            PendingRuleName(void) const { return(m_pendRule >= 0 ? m_ruleName[m_pendRule] : ""); }
    int               PendingRulePrio(void) const { return(m_pendRule >= 0 ? m_rulePrio[m_pendRule] : 1000000); }
    datetime          TokyoTime(const datetime serverTime) const;
@@ -589,6 +592,7 @@ double CModuleSet::TokyoFix(void)
 //|   （| の代わりに , 、; の代わりに / でもよい）                          |
 //|   時計：TKY / LDN / NY    向き：BUY / SELL                            |
 //|   日の条件：ALL / GOTOBI / MONTHEND / MONTHSTART / MON〜FRI            |
+//|   8つ目（任意）：PRE30:-0.07 ＝ 直前30分の値動き÷1時間足の平均値幅>-0.07 |
 //|   例）"R1:EURUSD|NY|0200|360|SELL|ALL|25;R2:USDJPY|TKY|0955|125|SELL|GOTOBI|30" |
 //| 戻り値：読み込んだルールの数                                           |
 //+------------------------------------------------------------------+
@@ -622,12 +626,13 @@ int CModuleSet::SetRules(const string rules)
         }
       StringReplace(item, ",", "|");
       string f[];
-      if(StringSplit(item, '|', f) != 7)
+      const int nf = StringSplit(item, '|', f);
+      if(nf != 7 && nf != 8)
         {
          PrintFormat("[AMS] 時刻ルールの書式が正しくありません: %s", items[i]);
          continue;
         }
-      for(int k = 0; k < 7; k++)
+      for(int k = 0; k < nf; k++)
         {
          StringTrimLeft(f[k]);
          StringTrimRight(f[k]);
@@ -662,6 +667,8 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_ruleDir, m_ruleCount);
       ArrayResize(m_ruleFilter, m_ruleCount);
       ArrayResize(m_ruleSL, m_ruleCount);
+      ArrayResize(m_rulePreMin, m_ruleCount);
+      ArrayResize(m_rulePreThr, m_ruleCount);
       ArrayResize(m_ruleName, m_ruleCount);
       ArrayResize(m_rulePrio, m_ruleCount);
       m_ruleClock[k]  = clock;
@@ -670,10 +677,23 @@ int CModuleSet::SetRules(const string rules)
       m_ruleDir[k]    = dir;
       m_ruleFilter[k] = filter;
       m_ruleSL[k]     = StringToDouble(f[6]);
+      //--- 8つ目（任意）：直前の値動きの条件 "PRE30:-0.07" ＝ 30分前からの値動き ÷ 1時間足の平均値幅 が -0.07 より大きいとき
+      m_rulePreMin[k] = 0;
+      m_rulePreThr[k] = 0.0;
+      if(nf == 8 && StringFind(f[7], "PRE") == 0)
+        {
+         const int c = StringFind(f[7], ":");
+         if(c > 3)
+           {
+            m_rulePreMin[k] = (int)StringToInteger(StringSubstr(f[7], 3, c - 3));
+            m_rulePreThr[k] = StringToDouble(StringSubstr(f[7], c + 1));
+           }
+        }
       m_ruleName[k]   = name;
       m_rulePrio[k]   = i;
-      PrintFormat("[AMS] %s 時刻ルール %s: %s %04d から %d 分 %s（%s）SL %.0f pips",
-                  m_symbol, name, f[1], m_ruleHHMM[k], m_ruleHold[k], f[4], f[5], m_ruleSL[k]);
+      PrintFormat("[AMS] %s 時刻ルール %s: %s %04d から %d 分 %s（%s）SL %.0f pips%s",
+                  m_symbol, name, f[1], m_ruleHHMM[k], m_ruleHold[k], f[4], f[5], m_ruleSL[k],
+                  m_rulePreMin[k] > 0 ? StringFormat(" 直前%d分の値動き>%.2f", m_rulePreMin[k], m_rulePreThr[k]) : "");
      }
    return(m_ruleCount);
   }
@@ -780,10 +800,40 @@ double CModuleSet::CalendarSignal(void)
          continue;
       if(!RuleDayOK(m_ruleFilter[k], local, m_ruleClock[k]))
          continue;
+      if(m_rulePreMin[k] > 0 && !PreMoveOK(m_rulePreMin[k], m_rulePreThr[k]))
+         continue;
       m_pendRule = k;
       return((double)m_ruleDir[k]);
      }
    return(0.0);
+  }
+
+//+------------------------------------------------------------------+
+//| 直前の値動きの条件：いまの足の始値 − minutes 分前の足の始値 を、       |
+//| 1時間足の直近24本（確定足）の平均値幅で割った値が thr より大きいか     |
+//+------------------------------------------------------------------+
+bool CModuleSet::PreMoveOK(const int minutes, const double thr) const
+  {
+   const int per = PeriodSeconds(m_tf) / 60;
+   if(per <= 0 || minutes % per != 0)
+      return(false);
+   const double now  = iOpen(m_symbol, m_tf, 0);
+   const double prev = iOpen(m_symbol, m_tf, minutes / per);
+   double rng = 0.0;
+   int    n   = 0;
+   for(int i = 1; i <= 24; i++)
+     {
+      const double h = iHigh(m_symbol, PERIOD_H1, i), l = iLow(m_symbol, PERIOD_H1, i);
+      if(h > 0.0 && l > 0.0)
+        {
+         rng += h - l;
+         n++;
+        }
+     }
+   if(now <= 0.0 || prev <= 0.0 || n < 12 || rng <= 0.0)
+      return(false);
+   const double z = (now - prev) / (rng / n);
+   return(z > thr);
   }
 
 #endif // AMS_MODULES_MQH
