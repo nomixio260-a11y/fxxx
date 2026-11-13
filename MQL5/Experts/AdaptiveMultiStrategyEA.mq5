@@ -49,6 +49,8 @@ input int              InpFixDirection      = 1;           // [東京仲値] 1 =
 input double           InpFixStopPips       = 30.0;        // [東京仲値] SL の幅（pips）
 input double           InpFixMaxSpreadPips  = 1.5;         // [東京仲値] スプレッドがこの pips を超えていたら待つ
 input string           InpCalendarRules     = "";          // [時刻ルール] "名前:銘柄|時計|HHMM|保有分|BUY/SELL|日の条件|SLpips" を ; で区切る
+input string           InpCalendarRules2    = "";          // [時刻ルール] 続き（テスターの入力は1つ255文字までのため、分けて書ける）
+input string           InpCalendarRules3    = "";          // [時刻ルール] 続き
 input string           InpJPHolidays        = "";          // [東京仲値] 追加の休業日（例 2027.01.01,2027.01.11。2015〜2026年は内蔵）
 
 input group "=== 相場状況（レジーム）判定 ==="
@@ -244,7 +246,7 @@ bool CSymbolTrader::Init(const string sym)
          return(false);
       modules.SetTokyoFix(InpFixEntryHHMM, InpFixExitHHMM, InpFixGotobiOnly, InpFixDirection);
       modules.AddHolidays(InpJPHolidays);
-      if(InpEntryMode == ENTRY_CALENDAR && modules.SetRules(InpCalendarRules) == 0)
+      if(InpEntryMode == ENTRY_CALENDAR && modules.SetRules(InpCalendarRules + "/" + InpCalendarRules2 + "/" + InpCalendarRules3) == 0)
         {
          PrintFormat("[AMS] %s に当てはまる時刻ルールがないため、この銘柄は取引しません", sym);
          return(false);
