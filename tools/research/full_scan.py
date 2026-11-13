@@ -41,67 +41,79 @@ def pf(x):
     return gp / gl if gl > 0 else 9.99
 
 
-def scan():
+def scan_pair(pair):
     rows = []
     n_tests = 0
-    for pair in D.PAIRS:
-        df = D.bars(pair, "5min")
-        pip = D.pip_size(pair)
-        cost = S.COST[pair]
-        idx = df.index
-        o = df["o"].values
-        ny_h = df["ny_h"].values
-        # 週明け（前の足から30時間以上空いた足）から3時間以内
-        gap = np.r_[np.inf, np.diff(idx.values).astype("timedelta64[m]").astype(float)]
-        wk = np.zeros(len(df), bool)
-        wo = np.where(gap >= 30 * 60)[0]
-        for i in wo:
-            wk[i:i + 36] = True
-        m_des = D.period_mask(idx, D.DESIGN)
-        m_val = D.period_mask(idx, D.VALID)
-        for hold in HOLDS:
-            k = hold // 5
-            # hold 分後の足の始値（足が欠けていない場合だけ）
-            j = np.arange(len(df)) + k
-            ok = j < len(df)
-            r = np.full(len(df), np.nan)
-            jj = j[ok]
-            same = (idx.values[jj] - idx.values[np.arange(len(df))[ok]]) == np.timedelta64(hold, "m")
-            rr = (o[jj] - o[np.arange(len(df))[ok]]) / pip
-            rr[~same] = np.nan
-            r[ok] = rr
-            # 日付の変わり目にかかるものは除外
-            bad = wk.copy()
-            for s in range(0, k + 1):
-                h = np.r_[ny_h[s:], np.full(s, -1)]
-                bad |= (h >= 16) & (h <= 18)
-            r[bad] = np.nan
-            for clock in CLOCKS:
-                hh = df[f"{clock}_h"].values
-                mm = df[f"{clock}_m"].values
-                slot = np.where((mm == 0) | (mm == 30), hh * 2 + mm // 30, -1)
-                filters = S.day_filters(df, clock)
-                for fname, fm in filters.items():
-                    for sl in range(48):
-                        base = fm & (slot == sl)
-                        n_tests += 1
-                        n, mean, t = stats_vec(r[base & m_des])
-                        if n < 60 or abs(t) < DES_T:
-                            continue
-                        sign = 1.0 if mean > 0 else -1.0
-                        d = sign * r[base & m_des] - cost
-                        if np.nanmean(d) <= 0:
-                            continue
-                        v = sign * r[base & m_val] - cost
-                        vn, vmean, _ = stats_vec(v + cost)
-                        vt = stats_vec(v)[2]
-                        rows.append({"pair": pair, "clock": clock, "time": f"{sl // 2:02d}:{(sl % 2) * 30:02d}",
-                                     "hold": hold, "filter": fname, "dir": "買い" if sign > 0 else "売り",
-                                     "des_n": n, "des_mean": abs(mean), "des_t": abs(t), "des_pf": pf(d),
-                                     "val_n": vn, "val_mean": sign * vmean if vn else 0.0, "val_t": vt,
-                                     "val_net": np.nanmean(v) if vn else 0.0, "val_pf": pf(v) if vn else 0.0})
-        print(pair, "done", file=sys.stderr, flush=True)
-    return pd.DataFrame(rows), n_tests
+    df = D.bars(pair, "5min")
+    pip = D.pip_size(pair)
+    cost = S.COST[pair]
+    idx = df.index
+    o = df["o"].values
+    ny_h = df["ny_h"].values
+    # 週明け（前の足から30時間以上空いた足）から3時間以内
+    gap = np.r_[np.inf, np.diff(idx.values).astype("timedelta64[m]").astype(float)]
+    wk = np.zeros(len(df), bool)
+    for i in np.where(gap >= 30 * 60)[0]:
+        wk[i:i + 36] = True
+    m_des = D.period_mask(idx, D.DESIGN)
+    m_val = D.period_mask(idx, D.VALID)
+    # 保有時間ごとの値動き（足が欠けていない場合だけ。日付の変わり目にかかるものは除外）
+    rets = {}
+    pos = np.arange(len(df))
+    for hold in HOLDS:
+        k = hold // 5
+        j = pos + k
+        ok = j < len(df)
+        r = np.full(len(df), np.nan)
+        same = (idx.values[j[ok]] - idx.values[pos[ok]]) == np.timedelta64(hold, "m")
+        rr = (o[j[ok]] - o[pos[ok]]) / pip
+        rr[~same] = np.nan
+        r[ok] = rr
+        bad = wk.copy()
+        for s_ in range(0, k + 1):
+            h = np.r_[ny_h[s_:], np.full(s_, -1)]
+            bad |= (h >= 16) & (h <= 18)
+        r[bad] = np.nan
+        rets[hold] = r
+    for clock in CLOCKS:
+        hh = df[f"{clock}_h"].values
+        mm = df[f"{clock}_m"].values
+        slot = np.where((mm == 0) | (mm == 30), hh * 2 + mm // 30, -1)
+        filters = S.day_filters(df, clock)
+        slot_idx = {sl: np.where(slot == sl)[0] for sl in range(48)}
+        for fname, fm in filters.items():
+            for sl in range(48):
+                ii = slot_idx[sl]
+                ii = ii[fm[ii]]
+                des_i, val_i = ii[m_des[ii]], ii[m_val[ii]]
+                for hold in HOLDS:
+                    r = rets[hold]
+                    n_tests += 1
+                    n, mean, t = stats_vec(r[des_i])
+                    if n < 60 or abs(t) < DES_T:
+                        continue
+                    sign = 1.0 if mean > 0 else -1.0
+                    d = sign * r[des_i] - cost
+                    if np.nanmean(d) <= 0:
+                        continue
+                    v = sign * r[val_i] - cost
+                    vn, vraw, _ = stats_vec(r[val_i])
+                    vt = stats_vec(v)[2]
+                    rows.append({"pair": pair, "clock": clock, "time": f"{sl // 2:02d}:{(sl % 2) * 30:02d}",
+                                 "hold": hold, "filter": fname, "dir": "買い" if sign > 0 else "売り",
+                                 "des_n": n, "des_mean": abs(mean), "des_t": abs(t), "des_pf": pf(d),
+                                 "val_n": vn, "val_mean": sign * vraw if vn else 0.0, "val_t": vt,
+                                 "val_net": np.nanmean(v) if vn else 0.0, "val_pf": pf(v) if vn else 0.0})
+    print(pair, "done", file=sys.stderr, flush=True)
+    return rows, n_tests
+
+
+def scan():
+    from multiprocessing import Pool
+    with Pool(3) as pool:
+        parts = pool.map(scan_pair, D.PAIRS)
+    rows = [r for p in parts for r in p[0]]
+    return pd.DataFrame(rows), sum(p[1] for p in parts)
 
 
 def main():
