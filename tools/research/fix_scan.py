@@ -11,7 +11,8 @@
 - 向きは設計期間の平均で決め、設計期間で |t| ≥ 3 かつコスト込みでプラスのものだけを残す。
 - 残ったものを、向きを固定したまま検証期間で確かめる。最終確認期間は見ない。
 
-使い方: python3 tools/research/fix_scan.py  → reports/research/fix_scan.md
+使い方: python3 tools/research/fix_scan.py    → reports/research/fix_scan.md
+        python3 tools/research/fix_scan.py 2  → 追加の時刻で reports/research/fix_scan2.md
 """
 import os
 import sys
@@ -25,17 +26,21 @@ import seasonality as S  # noqa: E402
 
 EVENTS = [("tky", 9, 55, "東京仲値"), ("ldn", 8, 0, "ロンドン寄り付き"), ("ldn", 13, 15, "ECB参照レート"),
           ("ldn", 16, 0, "WM/Rフィックス"), ("ny", 8, 30, "米指標"), ("ny", 10, 0, "NYオプションカット")]
+# 2回目の探索で加えた時刻（1回目とは別に記録する）
+EVENTS2 = [("tky", 9, 0, "東京寄り付き"), ("tky", 10, 15, "人民元基準値"), ("tky", 15, 0, "東京引け"),
+           ("ldn", 7, 0, "フランクフルト寄り付き"), ("ldn", 16, 30, "ロンドン引け"), ("ny", 12, 0, "NY昼")]
 WINDOWS = [(-60, 0), (-30, 0), (0, 30), (0, 60), (0, 120)]
 
 
-def scan():
+def scan(events=None):
+    events = events or EVENTS
     rows = []
     for pair in D.PAIRS:
         df = D.bars(pair, "5min")
         pip = D.pip_size(pair)
         cost = S.COST[pair]
         o = df["o"]
-        for clock, hh, mm, name in EVENTS:
+        for clock, hh, mm, name in events:
             fix = df.index[(df[f"{clock}_h"].values == hh) & (df[f"{clock}_m"].values == mm)]
             if len(fix) == 0:
                 continue
@@ -74,10 +79,13 @@ def scan():
 
 
 def main():
-    res = scan()
-    n_tests = len(D.PAIRS) * len(WINDOWS) * (len(EVENTS) * 8 + 1)
+    second = len(sys.argv) > 1 and sys.argv[1] == "2"
+    events = EVENTS2 if second else EVENTS
+    tag = "fix_scan2" if second else "fix_scan"
+    res = scan(events)
+    n_tests = len(D.PAIRS) * len(WINDOWS) * (len(events) * 8 + 1)
     out_dir = os.path.join(D.ROOT, "reports", "research")
-    res.to_csv(os.path.join(out_dir, "fix_scan_all.csv"), index=False)
+    res.to_csv(os.path.join(out_dir, f"{tag}_all.csv"), index=False)
     passed = res[(res["val_net"] > 0) & (res["val_pf"] >= 1.10) & (res["val_t"] >= 1.5)] if len(res) else res
     lines = ["# 仲値・フィキシング前後の偏りの探索（5分足）", "",
              f"- 調べた仮説の数：約 {n_tests:,} 通り",
@@ -92,7 +100,7 @@ def main():
             lines.append(f"| {r.pair} | {r.event} {r.fix}（{r.clock}） | {r.win} | {r['filter']} | {r.dir} | {r.des_n} | {r.des_mean:+.1f} | "
                          f"{r.des_t:.1f} | {r.des_pf:.2f} | {r.val_n} | {r.val_mean:+.1f} | {r.val_t:.1f} | {r.val_pf:.2f} | {ok} |")
     text = "\n".join(lines) + "\n"
-    open(os.path.join(out_dir, "fix_scan.md"), "w", encoding="utf-8").write(text)
+    open(os.path.join(out_dir, f"{tag}.md"), "w", encoding="utf-8").write(text)
     print(text)
 
 
