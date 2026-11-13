@@ -88,6 +88,7 @@ private:
    int               m_ruleDir[];     // +1 買い / -1 売り
    int               m_ruleFilter[];  // 日の条件（下の RULE_* ）
    double            m_ruleSL[];      // SL（pips）
+   double            m_ruleSLk[];     // SL を「1時間足の平均値幅 × この倍数」までに狭める（0 = 固定の pips のみ）。"30A2" の A2
    int               m_rulePreMin[];  // 直前の値動きの条件：何分前からの値動きを見るか（0 = 条件なし）
    double            m_rulePreThr[];  // その値動き（1時間足の平均値幅で割った値）がこれより大きいときだけ入る
    bool              m_rulePreBelow[]; // true のときは「これより小さいときだけ入る」（"PRE30:<-0.37"）
@@ -132,7 +133,8 @@ public:
    void              SetTokyoFix(const int entryHHMM, const int exitHHMM, const bool gotobiOnly, const int dir);
    void              AddHolidays(const string list);
    int               SetRules(const string rules);
-   double            PendingRuleSL(void) const { return(m_pendRule >= 0 ? m_ruleSL[m_pendRule] : 0.0); }
+   double            PendingRuleSL(void) const;
+   double            H1RangePips(void) const;
    bool              PreMoveOK(const int minutes, const double thr, const bool below) const;
    string            PendingRuleName(void) const { return(m_pendRule >= 0 ? m_ruleName[m_pendRule] : ""); }
    int               PendingRulePrio(void) const { return(m_pendRule >= 0 ? m_rulePrio[m_pendRule] : 1000000); }
@@ -674,6 +676,7 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_ruleFilter, m_ruleCount);
       ArrayResize(m_ruleSL, m_ruleCount);
       ArrayResize(m_rulePreMin, m_ruleCount);
+      ArrayResize(m_ruleSLk, m_ruleCount);
       ArrayResize(m_rulePreThr, m_ruleCount);
       ArrayResize(m_rulePreBelow, m_ruleCount);
       ArrayResize(m_ruleName, m_ruleCount);
@@ -683,7 +686,16 @@ int CModuleSet::SetRules(const string rules)
       m_ruleHold[k]   = (int)StringToInteger(f[3]);
       m_ruleDir[k]    = dir;
       m_ruleFilter[k] = filter;
-      m_ruleSL[k]     = StringToDouble(f[6]);
+      //--- SL："30"（固定）または "30A2"（30 pips と 平均値幅×2 の狭いほう）
+      m_ruleSLk[k] = 0.0;
+      const int ia = StringFind(f[6], "A");
+      if(ia > 0)
+        {
+         m_ruleSL[k]  = StringToDouble(StringSubstr(f[6], 0, ia));
+         m_ruleSLk[k] = StringToDouble(StringSubstr(f[6], ia + 1));
+        }
+      else
+         m_ruleSL[k] = StringToDouble(f[6]);
       //--- 8つ目（任意）：直前の値動きの条件 "PRE30:-0.07" ＝ 30分前からの値動き ÷ 1時間足の平均値幅 が -0.07 より大きいとき
       m_rulePreMin[k] = 0;
       m_rulePreThr[k] = 0.0;
@@ -851,6 +863,43 @@ bool CModuleSet::PreMoveOK(const int minutes, const double thr, const bool below
       return(false);
    const double z = (now - prev) / (rng / n);
    return(below ? (z < thr) : (z > thr));
+  }
+
+//+------------------------------------------------------------------+
+//| 1時間足の直近24本（確定足）の平均値幅（pips）                         |
+//+------------------------------------------------------------------+
+double CModuleSet::H1RangePips(void) const
+  {
+   double rng = 0.0;
+   int    n   = 0;
+   for(int i = 1; i <= 24; i++)
+     {
+      const double h = iHigh(m_symbol, PERIOD_H1, i), l = iLow(m_symbol, PERIOD_H1, i);
+      if(h > 0.0 && l > 0.0)
+        {
+         rng += h - l;
+         n++;
+        }
+     }
+   const double pip = PipSize(m_symbol);
+   return((n >= 12 && pip > 0.0) ? rng / n / pip : 0.0);
+  }
+
+//+------------------------------------------------------------------+
+//| 保留中のルールの SL（pips）。"30A2" なら min(30, 平均値幅×2)            |
+//+------------------------------------------------------------------+
+double CModuleSet::PendingRuleSL(void) const
+  {
+   if(m_pendRule < 0)
+      return(0.0);
+   double sl = m_ruleSL[m_pendRule];
+   if(m_ruleSLk[m_pendRule] > 0.0)
+     {
+      const double r = H1RangePips();
+      if(r > 0.0)
+         sl = MathMin(sl, MathMax(5.0, m_ruleSLk[m_pendRule] * r));
+     }
+   return(sl);
   }
 
 #endif // AMS_MODULES_MQH
