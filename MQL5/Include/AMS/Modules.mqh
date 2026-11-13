@@ -15,6 +15,37 @@
 
 #include "Common.mqh"
 
+//--- 東京の銀行の休業日（日本の祝日・振替休日、1/2・1/3・12/31）。2015〜2026年。
+//    これ以外の年や臨時の休日は、入力 InpJPHolidays で追加する。
+const int AMS_JP_HOLIDAYS[] =
+  {
+   20150101, 20150102, 20150103, 20150112, 20150211, 20150321, 20150429, 20150503, 20150504, 20150505,
+   20150506, 20150720, 20150921, 20150922, 20150923, 20151012, 20151103, 20151123, 20151223, 20151231,
+   20160101, 20160103, 20160111, 20160211, 20160320, 20160321, 20160429, 20160503, 20160504, 20160505,
+   20160718, 20160811, 20160919, 20160922, 20161010, 20161103, 20161123, 20161223, 20161231, 20170101,
+   20170102, 20170103, 20170109, 20170211, 20170320, 20170429, 20170503, 20170504, 20170505, 20170717,
+   20170811, 20170918, 20170923, 20171009, 20171103, 20171123, 20171223, 20171231, 20180101, 20180102,
+   20180103, 20180108, 20180211, 20180212, 20180321, 20180429, 20180430, 20180503, 20180504, 20180505,
+   20180716, 20180811, 20180917, 20180923, 20180924, 20181008, 20181103, 20181123, 20181223, 20181224,
+   20181231, 20190101, 20190102, 20190103, 20190114, 20190211, 20190321, 20190429, 20190430, 20190501,
+   20190502, 20190503, 20190504, 20190505, 20190506, 20190715, 20190811, 20190812, 20190916, 20190923,
+   20191014, 20191022, 20191103, 20191104, 20191123, 20191231, 20200101, 20200102, 20200103, 20200113,
+   20200211, 20200223, 20200224, 20200320, 20200429, 20200503, 20200504, 20200505, 20200506, 20200723,
+   20200724, 20200810, 20200921, 20200922, 20201103, 20201123, 20201231, 20210101, 20210103, 20210111,
+   20210211, 20210223, 20210320, 20210429, 20210503, 20210504, 20210505, 20210722, 20210723, 20210808,
+   20210809, 20210920, 20210923, 20211103, 20211123, 20211231, 20220101, 20220103, 20220110, 20220211,
+   20220223, 20220321, 20220429, 20220503, 20220504, 20220505, 20220718, 20220811, 20220919, 20220923,
+   20221010, 20221103, 20221123, 20221231, 20230101, 20230102, 20230103, 20230109, 20230211, 20230223,
+   20230321, 20230429, 20230503, 20230504, 20230505, 20230717, 20230811, 20230918, 20230923, 20231009,
+   20231103, 20231123, 20231231, 20240101, 20240102, 20240103, 20240108, 20240211, 20240212, 20240223,
+   20240320, 20240429, 20240503, 20240504, 20240505, 20240506, 20240715, 20240811, 20240812, 20240916,
+   20240922, 20240923, 20241014, 20241103, 20241104, 20241123, 20241231, 20250101, 20250102, 20250103,
+   20250113, 20250211, 20250223, 20250224, 20250320, 20250429, 20250503, 20250504, 20250505, 20250506,
+   20250721, 20250811, 20250915, 20250923, 20251013, 20251103, 20251123, 20251124, 20251231, 20260101,
+   20260102, 20260103, 20260112, 20260211, 20260223, 20260320, 20260429, 20260503, 20260504, 20260505,
+   20260506, 20260720, 20260811, 20260921, 20260922, 20260923, 20261012, 20261103, 20261123, 20261231
+  };
+
 class CModuleSet
   {
 private:
@@ -55,6 +86,8 @@ private:
    bool              IsUSDST(const datetime t) const;
    bool              IsGotobiTarget(const datetime tokyo) const;
    bool              IsGotobi(const datetime tokyo) const;
+   bool              IsTokyoBusinessDay(const datetime tokyo) const;
+   int               m_extraHolidays[];   // 入力で追加した休業日（YYYYMMDD）
    int               TokyoHHMM(const datetime tokyo) const;
 
 public:
@@ -71,6 +104,7 @@ public:
    int               NYHour(const datetime t) const;
    int               OpenTOD(void) const { return(m_openTOD); }
    void              SetTokyoFix(const int entryHHMM, const int exitHHMM, const bool gotobiOnly, const int dir);
+   void              AddHolidays(const string list);
    datetime          TokyoTime(const datetime serverTime) const;
    double            EntrySignal(const double meanRevSignal);
    bool              ExitSignal(const ENUM_POSITION_TYPE type);
@@ -426,19 +460,68 @@ bool CModuleSet::IsGotobiTarget(const datetime tokyo) const
   }
 
 //+------------------------------------------------------------------+
-//| 今日がゴトー日か。対象日が土日のときは、直前の金曜に前倒しする。          |
-//| （日本の祝日は考慮していない）                                        |
+//| 入力で追加の休業日を受け取る（"2027.01.01,2027.01.11" の形式）          |
 //+------------------------------------------------------------------+
-bool CModuleSet::IsGotobi(const datetime tokyo) const
+void CModuleSet::AddHolidays(const string list)
+  {
+   string parts[];
+   const int n = StringSplit(list, ',', parts);
+   for(int i = 0; i < n; i++)
+     {
+      string d = parts[i];
+      StringTrimLeft(d);
+      StringTrimRight(d);
+      StringReplace(d, ".", "");
+      StringReplace(d, "-", "");
+      StringReplace(d, "/", "");
+      if(StringLen(d) != 8)
+         continue;
+      const int v = (int)StringToInteger(d);
+      const int k = ArraySize(m_extraHolidays);
+      ArrayResize(m_extraHolidays, k + 1);
+      m_extraHolidays[k] = v;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| 東京の銀行の営業日か（土日・祝日・年末年始を除く）                      |
+//+------------------------------------------------------------------+
+bool CModuleSet::IsTokyoBusinessDay(const datetime tokyo) const
   {
    MqlDateTime dt;
    TimeToStruct(tokyo, dt);
    if(dt.day_of_week == 0 || dt.day_of_week == 6)
       return(false);
+   const int key = dt.year * 10000 + dt.mon * 100 + dt.day;
+   for(int i = 0; i < ArraySize(AMS_JP_HOLIDAYS); i++)
+      if(AMS_JP_HOLIDAYS[i] == key)
+         return(false);
+   for(int i = 0; i < ArraySize(m_extraHolidays); i++)
+      if(m_extraHolidays[i] == key)
+         return(false);
+   return(true);
+  }
+
+//+------------------------------------------------------------------+
+//| 今日がゴトー日か。                                                  |
+//|  対象日（5・10・15・20・25・30日と月末）が休業日のときは、               |
+//|  直前の営業日に前倒しする（土日だけでなく、日本の祝日も考慮する）。         |
+//+------------------------------------------------------------------+
+bool CModuleSet::IsGotobi(const datetime tokyo) const
+  {
+   if(!IsTokyoBusinessDay(tokyo))
+      return(false);
    if(IsGotobiTarget(tokyo))
       return(true);
-   if(dt.day_of_week == 5)
-      return(IsGotobiTarget(tokyo + 86400) || IsGotobiTarget(tokyo + 2 * 86400));
+   //--- 翌日から次の営業日の前日までに対象日があれば、今日に前倒しされる
+   for(int k = 1; k <= 10; k++)
+     {
+      const datetime d = tokyo + k * 86400;
+      if(IsTokyoBusinessDay(d))
+         break;
+      if(IsGotobiTarget(d))
+         return(true);
+     }
    return(false);
   }
 
@@ -456,9 +539,8 @@ double CModuleSet::TokyoFix(void)
       return(0.0);
    if(m_fixGotobiOnly && !IsGotobi(tokyo))
       return(0.0);
-   MqlDateTime dt;
-   TimeToStruct(tokyo, dt);
-   if(dt.day_of_week == 0 || dt.day_of_week == 6)
+   //--- 東京が休業日の日は仲値が無いので取引しない
+   if(!IsTokyoBusinessDay(tokyo))
       return(0.0);
    return((double)m_fixDir);
   }

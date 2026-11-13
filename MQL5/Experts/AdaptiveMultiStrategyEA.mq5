@@ -48,6 +48,7 @@ input bool             InpFixGotobiOnly     = true;        // [東京仲値] ゴ
 input int              InpFixDirection      = 1;           // [東京仲値] 1 = 買い / -1 = 売り
 input double           InpFixStopPips       = 30.0;        // [東京仲値] SL の幅（pips）
 input double           InpFixMaxSpreadPips  = 1.5;         // [東京仲値] スプレッドがこの pips を超えていたら待つ
+input string           InpJPHolidays        = "";          // [東京仲値] 追加の休業日（例 2027.01.01,2027.01.11。2015〜2026年は内蔵）
 
 input group "=== 相場状況（レジーム）判定 ==="
 input int              InpADXPeriod         = 14;          // ADX 期間
@@ -157,6 +158,9 @@ double g_weights[4][AMS_STRATEGY_COUNT];   // [REGIME][STRATEGY]
 double g_peakEquity = 0.0;
 bool   g_stopOut    = false;   // バックテスト中に強制ロスカットがあったか
 bool   g_halted     = false;
+int    g_sigTotal   = 0;       // 注文を試みる対象になったシグナルの数
+int    g_sigSpread  = 0;       // スプレッドが広いまま期限切れになり、見送ったシグナルの数
+int    g_sigOther   = 0;       // その他の理由（取引時間外・上限など）で見送ったシグナルの数
 
 int CountAllPositions(void);
 
@@ -178,6 +182,7 @@ public:
    string            pendTag;
    double            pendMul;
    datetime          pendUntil;       // この時刻を過ぎたら古いシグナルとして捨てる
+   bool              pendSpreadWait;  // スプレッドが広くて待っているか（見送りの集計用）
    datetime          lastEntryTry;
 
    //--- 保留中の決済（日付の変わり目など、市場が閉じていて決済できないときに再試行する）
@@ -188,6 +193,7 @@ public:
 
                      CSymbolTrader(void) : symbol(""), lastBar(0), lastATR(0.0), lastCloseTry(0),
                                            pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0),
+                                           pendSpreadWait(false),
                                            pendUntil(0), lastEntryTry(0),
                                            pendCloseBuy(false), pendCloseSell(false), pendCloseReason(""),
                                            lastExitTry(0) {}
@@ -232,6 +238,7 @@ bool CSymbolTrader::Init(const string sym)
                        InpRSIPeriod, InpPBRsiLow, InpPBRsiHigh, InpPBEmaFast, InpPBEmaSlow))
          return(false);
       modules.SetTokyoFix(InpFixEntryHHMM, InpFixExitHHMM, InpFixGotobiOnly, InpFixDirection);
+      modules.AddHolidays(InpJPHolidays);
       //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
       const int tod = modules.OpenTOD();
       if(tod >= 0)
@@ -406,6 +413,8 @@ void CSymbolTrader::OnBar(void)
    pendTag   = tag;
    pendMul   = riskMul;
    pendUntil = iTime(symbol, InpTimeframe, 0) + PeriodSeconds(InpTimeframe) / 4;
+   pendSpreadWait = false;
+   g_sigTotal++;
   }
 
 //+------------------------------------------------------------------+
@@ -420,6 +429,10 @@ void CSymbolTrader::TryEnter(void)
    if(g_halted || TimeCurrent() > pendUntil || WeekendCloseTime() ||
       !WithinTradingHours(InpStartHour, InpEndHour) || risk.DailyLossHit())
      {
+      if(pendSpreadWait && TimeCurrent() > pendUntil)
+         g_sigSpread++;
+      else
+         g_sigOther++;
       pendDir = 0;
       return;
      }
@@ -453,11 +466,18 @@ void CSymbolTrader::TryEnter(void)
      {
       //--- 短い時間足の ATR は小さすぎて基準にならないので、pips で上限を決める
       if(InpFixMaxSpreadPips > 0.0 && spread > InpFixMaxSpreadPips * PipSize(symbol))
+        {
+         pendSpreadWait = true;
          return;
+        }
      }
    else
       if(InpMaxSpreadATR > 0.0 && lastATR > 0.0 && spread > lastATR * InpMaxSpreadATR)
+        {
+         pendSpreadWait = true;
          return;
+        }
+   pendSpreadWait = false;
    if(TimeCurrent() - lastEntryTry < 5)
       return;
    lastEntryTry = TimeCurrent();
@@ -1047,6 +1067,9 @@ double OnTester(void)
    const bool output = !MQLInfoInteger(MQL_OPTIMIZATION);
    if(output)
       ReportBreakdown();
+   if(output)
+      PrintFormat("[AMS] シグナル %d 件のうち、スプレッドが広いまま見送り %d 件、その他の理由で見送り %d 件",
+                  g_sigTotal, g_sigSpread, g_sigOther);
    const double geo    = MonthlyReturns(output);
    const double trades = TesterStatistics(STAT_TRADES);
    const double dd     = TesterStatistics(STAT_EQUITY_DDREL_PERCENT);
