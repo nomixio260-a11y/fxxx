@@ -1,0 +1,23 @@
+; AdaptiveMultiStrategyEA - Tokyo fix (gotobi) preset for USDJPY M5
+; Load from the EA's Inputs tab ("Load"). Attach the EA to a USDJPY M5 chart.
+; Sell USDJPY at 9:55 Tokyo time on gotobi days (5th, 10th, ... and month end,
+; moved to the previous Tokyo business day), close at 12:00 Tokyo time.
+InpEntryMode=5
+InpSymbols=USDJPY
+InpTimeframe=5
+InpFixGotobiOnly=true
+InpFixDirection=-1
+InpFixEntryHHMM=955
+InpFixExitHHMM=1200
+InpFixStopPips=30.0
+InpFixMaxSpreadPips=1.5
+InpRiskPercent=1.0
+InpMaxPositions=1
+InpMaxPerSymbol=1
+InpBETriggerATR=0.0
+InpTrailDistATR=0.0
+InpTPATR=0.0
+InpCloseOnOpposite=false
+InpMaxDailyLossPct=15.0
+InpMaxDDStopPct=30.0
+InpMaxMarginUsePct=40.0
