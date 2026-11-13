@@ -954,7 +954,13 @@ void ReportBreakdown(void)
    if(!MQLInfoInteger(MQL_OPTIMIZATION))
       fh = FileOpen("AMS_breakdown.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
    if(fh != INVALID_HANDLE)
+     {
       FileWrite(fh, "kind", "name", "trades", "wins", "win_rate", "profit");
+      //--- シグナルの件数と、見送った件数（スプレッド拡大・その他）
+      FileWrite(fh, "signal", "total", g_sigTotal, 0, "", "0");
+      FileWrite(fh, "signal", "skip_spread", g_sigSpread, 0, "", "0");
+      FileWrite(fh, "signal", "skip_other", g_sigOther, 0, "", "0");
+     }
    Print("[AMS] ===== 銘柄別・相場状況別・ロジック別の成績 =====");
    WriteStats(fh, "symbol", sN, sT, sW, sP);
    WriteStats(fh, "regime", rN, rT, rW, rP);

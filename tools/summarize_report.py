@@ -153,6 +153,9 @@ def main():
                 parts.append(f"months={len(mr)} avg={sum(mr)/len(mr):+.2f}% geo={geo:+.2f}% min={min(mr):+.2f}% max={max(mr):+.2f}% ge10={sum(1 for r in mr if r >= 10)}")
         if os.path.exists(bd):
             br = list(csv.DictReader(open(bd, encoding="utf-8")))
+            sig = [r for r in br if r.get("kind") == "signal"]
+            if sig:
+                parts.append("signals:" + ",".join(f"{r['name']}={r['trades']}" for r in sig))
             for kind in ("symbol", "regime", "strategy", "cost"):
                 sub = [r for r in br if r.get("kind") == kind]
                 if sub:
