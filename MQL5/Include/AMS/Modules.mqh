@@ -584,6 +584,7 @@ double CModuleSet::TokyoFix(void)
 //+------------------------------------------------------------------+
 //| 時刻ルールを読み込む（この銘柄のものだけ）。                            |
 //| 書式："名前:銘柄|時計|HHMM|保有分|向き|日の条件|SLpips" を ; で区切る     |
+//|   （| の代わりに , 、; の代わりに / でもよい）                          |
 //|   時計：TKY / LDN / NY    向き：BUY / SELL                            |
 //|   日の条件：ALL / GOTOBI / MONTHEND / MONTHSTART / MON〜FRI            |
 //|   例）"R1:EURUSD|NY|0200|360|SELL|ALL|25;R2:USDJPY|TKY|0955|125|SELL|GOTOBI|30" |
@@ -598,8 +599,11 @@ double CModuleSet::TokyoFix(void)
 int CModuleSet::SetRules(const string rules)
   {
    m_ruleCount = 0;
+   //--- テスターの設定ファイルでは | と ; が使えないので、区切りに , と / も受け付ける
+   string all = rules;
+   StringReplace(all, "/", ";");
    string items[];
-   const int n = StringSplit(rules, ';', items);
+   const int n = StringSplit(all, ';', items);
    for(int i = 0; i < n; i++)
      {
       string item = items[i];
@@ -614,6 +618,7 @@ int CModuleSet::SetRules(const string rules)
          name = StringSubstr(item, 0, colon);
          item = StringSubstr(item, colon + 1);
         }
+      StringReplace(item, ",", "|");
       string f[];
       if(StringSplit(item, '|', f) != 7)
         {
