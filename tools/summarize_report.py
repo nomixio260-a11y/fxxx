@@ -110,8 +110,8 @@ def main():
         if cost:
             lines += ["## 約定が不利にずれた場合の試算", "",
                       "全取引で、1取引あたり下の pips だけ不利に約定したと仮定した総損益です（スリッページ・スプレッド拡大の影響の目安）。", "",
-                      "| 追加コスト | 総損益 |", "|---|---|"]
-            lines += [f"| {r['name']} | {float(r['profit']):,.0f} |" for r in cost]
+                      "| 追加コスト | 総損益 | PF |", "|---|---|---|"]
+            lines += [f"| {r['name']} | {float(r['profit']):,.0f} | {r.get('win_rate') or '-'} |" for r in cost]
             lines.append("")
 
     mp = os.path.join(out_dir, "AMS_monthly.csv")
@@ -156,10 +156,13 @@ def main():
             sig = [r for r in br if r.get("kind") == "signal"]
             if sig:
                 parts.append("signals:" + ",".join(f"{r['name']}={r['trades']}" for r in sig))
-            for kind in ("symbol", "regime", "strategy", "cost"):
+            for kind in ("symbol", "regime", "strategy"):
                 sub = [r for r in br if r.get("kind") == kind]
                 if sub:
                     parts.append(kind + ":" + ",".join(f"{r['name']}({r['trades']})={float(r['profit']):+.0f}" for r in sub))
+            sub = [r for r in br if r.get("kind") == "cost"]
+            if sub:
+                parts.append("cost:" + ",".join(f"{r['name']}={float(r['profit']):+.0f}(PF{r.get('win_rate') or '-'})" for r in sub))
         open(os.path.join(out_dir, "result_line.txt"), "w", encoding="utf-8").write("RESULT " + " | ".join(parts) + "\n")
     except Exception as e:  # 1行要約は補助なので、失敗しても全体は止めない
         print("result_line の作成に失敗:", e)

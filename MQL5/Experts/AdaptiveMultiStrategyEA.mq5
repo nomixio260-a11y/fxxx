@@ -917,6 +917,8 @@ void ReportBreakdown(void)
    int    sT[], sW[], rT[], rW[], lT[], lW[];
    double sP[], rP[], lP[];
    double netProfit = 0.0, costPerPip = 0.0;   // costPerPip: 全取引で1pipsずつ不利に約定した場合の損失額
+   double tP[], tC[];                           // 取引ごとの損益と、1pips 不利になったときの金額（コスト込み PF の計算用）
+   int    nT = 0;
 
    const int total = HistoryDealsTotal();
    for(int i = 0; i < total; i++)
@@ -948,10 +950,17 @@ void ReportBreakdown(void)
       //--- コストを上乗せした場合の試算用：この取引で 1pips 不利になったときの金額
       const string dsym   = HistoryDealGetString(deal, DEAL_SYMBOL);
       const double tickSz = SymbolInfoDouble(dsym, SYMBOL_TRADE_TICK_SIZE);
+      double c1 = 0.0;
       if(tickSz > 0.0)
-         costPerPip += HistoryDealGetDouble(deal, DEAL_VOLUME) * PipSize(dsym) / tickSz *
-                       SymbolInfoDouble(dsym, SYMBOL_TRADE_TICK_VALUE);
+         c1 = HistoryDealGetDouble(deal, DEAL_VOLUME) * PipSize(dsym) / tickSz *
+              SymbolInfoDouble(dsym, SYMBOL_TRADE_TICK_VALUE);
+      costPerPip += c1;
       netProfit += profit;
+      ArrayResize(tP, nT + 1, 1024);
+      ArrayResize(tC, nT + 1, 1024);
+      tP[nT] = profit;
+      tC[nT] = c1;
+      nT++;
 
       string parts[];
       if(StringSplit(comment, '|', parts) < 4)
@@ -982,9 +991,20 @@ void ReportBreakdown(void)
    for(int e = 0; e < 4; e++)
      {
       const double adj = netProfit - costPerPip * extra[e];
-      PrintFormat("[AMS] 追加コスト %.1f pips → 総損益 %.0f", extra[e], adj);
+      //--- 追加コストを引いた後の PF（総利益 ÷ 総損失）
+      double gp = 0.0, gl = 0.0;
+      for(int k = 0; k < nT; k++)
+        {
+         const double v = tP[k] - tC[k] * extra[e];
+         if(v > 0.0)
+            gp += v;
+         else
+            gl -= v;
+        }
+      const double pf = (gl > 0.0 ? gp / gl : 99.0);
+      PrintFormat("[AMS] 追加コスト %.1f pips → 総損益 %.0f  PF %.2f", extra[e], adj, pf);
       if(fh != INVALID_HANDLE)
-         FileWrite(fh, "cost", StringFormat("+%.1fpips", extra[e]), 0, 0, "", DoubleToString(adj, 0));
+         FileWrite(fh, "cost", StringFormat("+%.1fpips", extra[e]), nT, 0, DoubleToString(pf, 2), DoubleToString(adj, 0));
      }
    if(fh != INVALID_HANDLE)
       FileClose(fh);
