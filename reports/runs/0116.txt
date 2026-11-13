@@ -1,0 +1,2 @@
+run=116 mode=backtest period=M5 model=1 exec=default from=2022.01.01 to=2024.11.01 symbols=GBPUSD inputs=InpEntryMode=6;InpCalendarRules=R4:GBPUSD,LDN,0700,360,SELL,FRI,30;InpRiskPercent=1;InpBETriggerATR=0;InpTrailDistATR=0;InpMaxDDStopPct=0
+RESULT net=0 | pf=0.00 | trades=0 | win=0(0.00%) | dd=0%(0)
