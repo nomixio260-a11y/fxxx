@@ -16,7 +16,7 @@ $period = if ($env:BT_PERIOD) { $env:BT_PERIOD } else { 'H1' }
 # 既定は、通常のバックテストがランダム遅延、最適化は遅延なし（速度と再現性のため）
 $execMode = if ($env:BT_EXECUTION) { $env:BT_EXECUTION } elseif ($mode -eq 'optimize') { '0' } else { '-1' }
 $deposit  = if ($env:BT_DEPOSIT) { $env:BT_DEPOSIT } else { '1000000' }
-$tfValue = @{ 'M5' = 5; 'M15' = 15; 'M30' = 30; 'H1' = 16385; 'H2' = 16386; 'H4' = 16388; 'D1' = 16408 }[$period]
+$tfValue = @{ 'M1' = 1; 'M5' = 5; 'M15' = 15; 'M30' = 30; 'H1' = 16385; 'H2' = 16386; 'H4' = 16388; 'D1' = 16408 }[$period]
 if (-not $tfValue) { throw "未対応の時間足: $period" }
 $reportName = "AMS_$($symbol -replace '[^A-Za-z0-9]', '_')_$period"
 
