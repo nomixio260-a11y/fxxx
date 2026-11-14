@@ -475,7 +475,8 @@ bool CSymbolTrader::IsNewBar(void)
   {
    //--- 先回りの秒数があるときは、次の足の始まりのその秒数前に「新しい足」とみなす
    const datetime t = (InpEntryMode == ENTRY_CALENDAR && InpLeadSec != 0) ? modules.BarTime() : iTime(symbol, InpTimeframe, 0);
-   if(t == 0 || t == lastBar)
+   //--- 時刻が前に進んだときだけ新しい足とみなす（先回りの秒数が減って判断上の時刻が戻っても、同じ足を二度処理しない）
+   if(t == 0 || t <= lastBar)
       return(false);
    lastBar = t;
    return(true);
