@@ -5,6 +5,7 @@
 ;  C3 EURJPY sell 10:00-11:00 on month-end       C4 GBPJPY sell 22:00-24:00 (Tokyo) on the first 2 weekdays
 ;  A1 EURUSD sell 11:00-13:00 London time, every weekday
 ; Rules whose last 100 virtual trades have PF < 0.9 are paused automatically (after 60 trades)
+; Full compounding (no monthly lock); risk is halved while equity is >15% below its peak; large lots are split into several orders
 InpEntryMode=6
 InpSymbols=USDJPY,EURJPY,GBPJPY,EURUSD
 InpTimeframe=5
@@ -12,7 +13,7 @@ InpCalendarRules=G3F:USDJPY,TKY,0955,125,SELL,GOTOBI,30,PRE30:-0.07/P2:EURJPY,TK
 InpCalendarRules2=Q2:EURJPY,TKY,0955,125,SELL,GOTOBI,25,PRE30:0.33/C3:EURJPY,TKY,1000,60,SELL,MONTHEND,25/C4:GBPJPY,TKY,2200,120,SELL,MONTHSTART,40
 InpCalendarRules3=A1:EURUSD,LDN,1100,120,SELL,ALL,30
 InpEntryDelaySec=0
-InpMonthTargetPct=5.0
+InpMonthTargetPct=0.0
 InpMonthLockMul=0.5
 InpAdaptWindow=100
 InpAdaptMinTrades=60
@@ -26,3 +27,6 @@ InpBETriggerATR=0.0
 InpTrailDistATR=0.0
 InpTPATR=0.0
 InpMaxDDStopPct=0.0
+InpDDRiskCutPct=15.0
+InpDDRiskMul=0.5
+InpSplitOrders=true
