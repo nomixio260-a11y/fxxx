@@ -127,6 +127,7 @@ input int              InpMaxPositions      = 6;           // 全銘柄合計の
 input int              InpMaxPerSymbol      = 1;           // 1銘柄あたりの最大ポジション数（分けた注文は1つと数える）
 input bool             InpSplitOrders       = true;        // 1回の注文の上限を超えるロットは、分けて注文する（複利で残高が大きくなったとき用）
 input double           InpMaxLotsPerSymbol  = 0.0;         // 1回の取引（1銘柄）の最大ロット（0 = 上限なし）。残高が大きくなったときの約定の滑り・建玉の上限への備え
+input string           InpRuleRiskMul       = "";          // ルールごとのリスクの倍率（例 "C6:0.5,P8:0.5"。書いていないルールは 1.0）。1つのルールに頼りすぎないため
 input bool             InpWaitCloses        = true;        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
 input bool             InpExportDeals       = false;       // バックテストの終わりに、全取引を AMS_bt_deals.csv に書き出す（実運用との突き合わせ用）
 
@@ -287,6 +288,32 @@ int    g_sigSpread  = 0;       // スプレッドが広いまま期限切れに�
 int    g_sigOther   = 0;       // その他の理由（取引時間外・上限など）で見送ったシグナルの数
 
 int CountAllPositions(void);
+
+//+------------------------------------------------------------------+
+//| ルールごとのリスクの倍率（InpRuleRiskMul から読む。書いていなければ 1.0）|
+//+------------------------------------------------------------------+
+double RuleRiskMul(const string rule)
+  {
+   if(InpRuleRiskMul == "" || rule == "")
+      return(1.0);
+   string items[];
+   const int n = StringSplit(InpRuleRiskMul, ',', items);
+   for(int i = 0; i < n; i++)
+     {
+      string kv[];
+      if(StringSplit(items[i], ':', kv) != 2)
+        {
+         StringTrimLeft(items[i]);
+         continue;
+        }
+      string k = kv[0];
+      StringTrimLeft(k);
+      StringTrimRight(k);
+      if(k == rule)
+         return(StringToDouble(kv[1]));
+     }
+   return(1.0);
+  }
 
 class CSymbolTrader
   {
@@ -571,7 +598,7 @@ void CSymbolTrader::OnBar(void)
    pendDir   = (score > 0.0) ? 1 : -1;
    pendReg   = reg;
    pendTag   = tag;
-   pendMul   = riskMul;
+   pendMul   = riskMul * ((InpEntryMode == ENTRY_CALENDAR) ? RuleRiskMul(tag) : 1.0);
    pendUntil = iTime(symbol, InpTimeframe, 0) + PeriodSeconds(InpTimeframe) / 4;
    pendSpreadWait = false;
    pendPrio       = (InpEntryMode == ENTRY_CALENDAR) ? modules.PendingRulePrio() : 1000000;
