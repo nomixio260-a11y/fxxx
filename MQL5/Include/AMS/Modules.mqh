@@ -92,6 +92,8 @@ private:
    int               m_rulePreMin[];  // 直前の値動きの条件：何分前からの値動きを見るか（0 = 条件なし）
    double            m_rulePreThr[];  // その値動き（1時間足の平均値幅で割った値）がこれより大きいときだけ入る
    bool              m_rulePreBelow[]; // true のときは「これより小さいときだけ入る」（"PRE30:<-0.37"）
+   bool              m_ruleGap[];     // 向きを「週明けの窓と同じ向き」にする（向きの欄が "GAP"）
+   double            m_ruleGapMin[];  // 窓の大きさ（平均値幅で割った値）がこれ以上の週だけ（"GAP:0.70"）
    string            m_ruleName[];
    int               m_rulePrio[];    // 優先順位（入力に書いた順。小さいほど先に注文する）
    int               m_pendRule;      // シグナルを出したルール（エントリー待ち）
@@ -113,7 +115,7 @@ private:
    bool              RuleEnabled(const int k) const;
    double            RulePF(const int k, int &n) const;
    void              UpdateVirtual(void);
-   void              OpenVirtual(const int k);
+   void              OpenVirtual(const int k, const int dir);
    void              SaveAdaptive(void) const;
    void              LoadAdaptive(void);
    int               m_activeRule;    // 保有中のポジションのルール
@@ -160,6 +162,7 @@ public:
    void              AdaptiveReport(void) const;
    double            H1RangePips(void) const;
    bool              PreMoveOK(const int minutes, const double thr, const bool below) const;
+   int               WeekGapDir(const double minZ) const;
    string            PendingRuleName(void) const { return(m_pendRule >= 0 ? m_ruleName[m_pendRule] : ""); }
    int               PendingRulePrio(void) const { return(m_pendRule >= 0 ? m_rulePrio[m_pendRule] : 1000000); }
    datetime          TokyoTime(const datetime serverTime) const;
@@ -690,7 +693,8 @@ int CModuleSet::SetRules(const string rules)
       for(int k = 0; k < 5; k++)
          if(f[5] == dows[k])
             filter = RULE_DOW_BASE + k + 1;
-      const int dir = (f[4] == "BUY") ? 1 : ((f[4] == "SELL") ? -1 : 0);
+      const bool gapRule = (f[4] == "GAP");
+      const int dir = (f[4] == "BUY") ? 1 : ((f[4] == "SELL") ? -1 : (gapRule ? 1 : 0));
       if(clock < 0 || filter < 0 || dir == 0)
         {
          PrintFormat("[AMS] 時刻ルールの値が正しくありません: %s", items[i]);
@@ -707,6 +711,10 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_ruleSLk, m_ruleCount);
       ArrayResize(m_rulePreThr, m_ruleCount);
       ArrayResize(m_rulePreBelow, m_ruleCount);
+      ArrayResize(m_ruleGap, m_ruleCount);
+      ArrayResize(m_ruleGapMin, m_ruleCount);
+      m_ruleGap[k]    = gapRule;
+      m_ruleGapMin[k] = 0.0;
       ArrayResize(m_ruleName, m_ruleCount);
       ArrayResize(m_rulePrio, m_ruleCount);
       ArrayResize(m_vOpen, m_ruleCount);
@@ -739,6 +747,12 @@ int CModuleSet::SetRules(const string rules)
       m_rulePreMin[k] = 0;
       m_rulePreThr[k] = 0.0;
       m_rulePreBelow[k] = false;
+      if(nf == 8 && StringFind(f[7], "GAP") == 0)
+        {
+         const int c = StringFind(f[7], ":");
+         if(c > 0)
+            m_ruleGapMin[k] = StringToDouble(StringSubstr(f[7], c + 1));
+        }
       if(nf == 8 && StringFind(f[7], "PRE") == 0)
         {
          const int c = StringFind(f[7], ":");
@@ -872,8 +886,15 @@ double CModuleSet::CalendarSignal(void)
          continue;
       if(m_rulePreMin[k] > 0 && !PreMoveOK(m_rulePreMin[k], m_rulePreThr[k], m_rulePreBelow[k]))
          continue;
+      int dir = m_ruleDir[k];
+      if(m_ruleGap[k])
+        {
+         dir = WeekGapDir(m_ruleGapMin[k]);
+         if(dir == 0)
+            continue;
+        }
       //--- 自動調整：実際に注文するかどうかに関係なく、仮想の取引は記録し続ける
-      OpenVirtual(k);
+      OpenVirtual(k, dir);
       if(signal != 0.0)
          continue;
       if(!RuleEnabled(k))
@@ -882,7 +903,7 @@ double CModuleSet::CalendarSignal(void)
          continue;
         }
       m_pendRule = k;
-      signal = (double)m_ruleDir[k];
+      signal = (double)dir;
      }
    return(signal);
   }
@@ -998,7 +1019,7 @@ bool CModuleSet::RuleEnabled(const int k) const
 //+------------------------------------------------------------------+
 //| 仮想の取引を始める（いまの足の始値で、ルールの向きに）                  |
 //+------------------------------------------------------------------+
-void CModuleSet::OpenVirtual(const int k)
+void CModuleSet::OpenVirtual(const int k, const int dir)
   {
    if(m_adWin <= 0 || m_vOpen[k])
       return;
@@ -1006,7 +1027,7 @@ void CModuleSet::OpenVirtual(const int k)
    const double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
    const double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
    m_vOpen[k]   = true;
-   m_vDir[k]    = m_ruleDir[k];
+   m_vDir[k]    = dir;
    m_vEntry[k]  = iOpen(m_symbol, m_tf, 0);
    m_vSLpips[k] = RuleSL(k);
    m_vSpread[k] = (pip > 0.0 && ask > bid) ? (ask - bid) / pip : 0.0;
@@ -1133,6 +1154,48 @@ void CModuleSet::AdaptiveReport(void) const
       PrintFormat("[AMS] 自動調整の状態：%s %s 仮想取引 %d 回、直近 %d 回の PF %.2f、%s", m_symbol, m_ruleName[k],
                   m_vCnt[k], n, pf, RuleEnabled(k) ? "有効" : "停止中");
      }
+  }
+
+//+------------------------------------------------------------------+
+//| 週明けの窓の向き（+1 上に開いた / -1 下に開いた / 0 小さい・不明）。      |
+//| 窓 = 週明けの最初の足の始値 − その前の足の終値。                       |
+//| 大きさは、週明けの前の1時間足24本の平均値幅で割って比べる。             |
+//+------------------------------------------------------------------+
+int CModuleSet::WeekGapDir(const double minZ) const
+  {
+   const int maxBars = 4000;
+   for(int i = 0; i < maxBars; i++)
+     {
+      const datetime t0 = iTime(m_symbol, m_tf, i);
+      const datetime t1 = iTime(m_symbol, m_tf, i + 1);
+      if(t0 == 0 || t1 == 0)
+         return(0);
+      if(t0 - t1 < 30 * 3600)
+         continue;
+      //--- i 本前が週明けの最初の足
+      const double gap = iOpen(m_symbol, m_tf, i) - iClose(m_symbol, m_tf, i + 1);
+      const int    h1  = iBarShift(m_symbol, PERIOD_H1, t1, false);
+      if(h1 < 0)
+         return(0);
+      double rng = 0.0;
+      int    n   = 0;
+      for(int j = h1; j < h1 + 24; j++)
+        {
+         const double h = iHigh(m_symbol, PERIOD_H1, j), l = iLow(m_symbol, PERIOD_H1, j);
+         if(h > 0.0 && l > 0.0)
+           {
+            rng += h - l;
+            n++;
+           }
+        }
+      if(n < 12 || rng <= 0.0)
+         return(0);
+      const double z = gap / (rng / n);
+      if(MathAbs(z) < minZ)
+         return(0);
+      return(z > 0.0 ? 1 : -1);
+     }
+   return(0);
   }
 
 #endif // AMS_MODULES_MQH
