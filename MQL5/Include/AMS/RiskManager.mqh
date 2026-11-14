@@ -25,6 +25,7 @@ private:
    bool              m_allowMinLot;      // 計算ロットが最小ロット未満でも最小ロットで入るか
    double            m_maxMarginPct;     // 口座全体の必要証拠金の上限（有効証拠金の%）
    double            m_minLevelAfterSL;  // すべての建玉が損切りに達しても残す証拠金維持率（%）
+   bool              m_split;           // 1回の注文の上限を超えるロットを、分けて注文するか
    int               m_dayKey;           // 日付（YYYYMMDD）
    double            m_dayStartEquity;
 
@@ -43,6 +44,8 @@ public:
    void              UpdateDay(void);
    bool              DailyLossHit(void);
    double            NormalizeVolume(const double lots) const;
+   //--- true のとき、1回の注文の上限（SYMBOL_VOLUME_MAX）でロットを切らない（呼び出し側で注文を分ける）
+   void              SetSplitOrders(const bool split) { m_split = split; }
    double            CalcLots(const ENUM_ORDER_TYPE type, const double entry, const double sl,
                               const double riskMultiplier);
    bool              AdjustStops(const ENUM_ORDER_TYPE type, const double entry, double &sl, double &tp) const;
@@ -65,6 +68,7 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
                                    m_allowMinLot(false),
                                    m_maxMarginPct(40.0),
                                    m_minLevelAfterSL(150.0),
+                                   m_split(false),
                                    m_dayKey(0),
                                    m_dayStartEquity(0.0)
   {
@@ -131,7 +135,7 @@ double CRiskManager::NormalizeVolume(const double lots) const
    double v = MathFloor(lots / step + 1e-9) * step;
    if(v < minLot)
       v = m_allowMinLot ? minLot : 0.0;
-   if(v > maxLot)
+   if(v > maxLot && !m_split)
       v = maxLot;
 
    const int volDigits = (int)MathMax(0.0, MathCeil(-MathLog10(step)));

@@ -124,7 +124,8 @@ input group "=== エントリー/決済 ==="
 input double           InpEntryThreshold    = 0.45;        // 合計スコアがこれ以上でエントリー（0〜1）
 input bool             InpCloseOnOpposite   = true;        // 逆方向のシグナルで決済
 input int              InpMaxPositions      = 6;           // 全銘柄合計の最大ポジション数
-input int              InpMaxPerSymbol      = 1;           // 1銘柄あたりの最大ポジション数
+input int              InpMaxPerSymbol      = 1;           // 1銘柄あたりの最大ポジション数（分けた注文は1つと数える）
+input bool             InpSplitOrders       = true;        // 1回の注文の上限を超えるロットは、分けて注文する（複利で残高が大きくなったとき用）
 
 input group "=== 資金管理 ==="
 input double           InpRiskPercent       = 3.0;         // 1回の許容損失（有効証拠金の%）
@@ -348,6 +349,7 @@ bool CSymbolTrader::Init(const string sym)
       return(false);
    risk.Init(sym, InpMagic, GetPointer(g_trade), InpRiskPercent, InpMaxDailyLossPct, InpAllowMinLot,
              InpMaxMarginUsePct, InpMinLevelAfterSL);
+   risk.SetSplitOrders(InpSplitOrders);
    if(InpEntryMode != ENTRY_WEIGHTED)
      {
       if(!modules.Init(sym, InpTimeframe, InpEntryMode, InpDTEntryDays, InpDTExitDays,
@@ -748,11 +750,35 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
          return(false);
         }
 
-      const bool sent = isBuy ? g_trade.Buy(lots, symbol, entry, sl, tp, comment)
-                              : g_trade.Sell(lots, symbol, entry, sl, tp, comment);
+      //--- 1回の注文の上限を超える分は、残りを分けて注文する（最初の1本が通ったら成功とみなす）
+      const double maxLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+      const double first  = (maxLot > 0.0 && lots > maxLot) ? maxLot : lots;
+      const bool sent = isBuy ? g_trade.Buy(first, symbol, entry, sl, tp, comment)
+                              : g_trade.Sell(first, symbol, entry, sl, tp, comment);
       const uint rc = g_trade.ResultRetcode();
       if(sent && (rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL))
         {
+         double rest = lots - first;
+         int    parts = 1;
+         while(rest > 1e-9 && parts < 50)
+           {
+            const double v = risk.NormalizeVolume(MathMin(rest, maxLot));
+            if(v <= 0.0)
+               break;
+            MqlTick t2;
+            SymbolInfoTick(symbol, t2);
+            const bool ok = isBuy ? g_trade.Buy(v, symbol, t2.ask, sl, tp, comment)
+                                  : g_trade.Sell(v, symbol, t2.bid, sl, tp, comment);
+            if(!ok)
+              {
+               PrintFormat("[AMS] 分けた注文の %d 本目が失敗 %s %.2f lot retcode=%u", parts + 1, symbol, v, g_trade.ResultRetcode());
+               break;
+              }
+            rest -= v;
+            parts++;
+           }
+         if(parts > 1)
+            PrintFormat("[AMS] %s 合計 %.2f lot を %d 本に分けて注文（1回の上限 %.2f lot）", symbol, lots - rest, parts, maxLot);
          //--- 実際の約定価格と、注文時の価格とのずれ（スリッページ）を記録する
          const double fill = g_trade.ResultPrice();
          const double slip = (fill > 0.0) ? (isBuy ? fill - entry : entry - fill) / PipSize(symbol) : 0.0;
@@ -784,14 +810,25 @@ int            g_minPendPrio = 1000000;   // 保留中のシグナルのうち�
 //+------------------------------------------------------------------+
 int CountAllPositions(void)
   {
+   //--- 分けて注文した建玉は1つと数えるため、建玉のある銘柄の数を返す
+   string seen[];
    int n = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       const ulong ticket = PositionGetTicket(i);
       if(ticket == 0)
          continue;
-      if((ulong)PositionGetInteger(POSITION_MAGIC) == InpMagic)
-         n++;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic)
+         continue;
+      const string sym = PositionGetString(POSITION_SYMBOL);
+      bool dup = false;
+      for(int k = 0; k < n; k++)
+         if(seen[k] == sym)
+            dup = true;
+      if(dup)
+         continue;
+      ArrayResize(seen, n + 1);
+      seen[n++] = sym;
      }
    return(n);
   }
