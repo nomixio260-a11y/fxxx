@@ -6,6 +6,7 @@ tester/credentials.env
 *.ex5
 *.log
 !reports/*.log
+!reports/live/logs/*.log
 *.tmp
 __pycache__/
 data/
