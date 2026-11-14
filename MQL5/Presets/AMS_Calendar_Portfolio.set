@@ -5,7 +5,7 @@
 ;  C3 EURJPY sell 10:00-11:00 on month-end       C4 GBPJPY sell 22:00-24:00 (Tokyo) on the first 2 weekdays
 ;  A1 EURUSD sell 11:00-13:00 London time, every weekday
 ; Rules whose last 100 virtual trades have PF < 0.9 are paused automatically (after 60 trades)
-; Full compounding (no monthly lock); risk is halved while equity is >15% below its peak; large lots are split into several orders
+; Full compounding (no monthly lock); risk is halved while equity is >15% below its peak; large lots are split into several orders, capped at 30 lots per trade
 InpEntryMode=6
 InpSymbols=USDJPY,EURJPY,GBPJPY,EURUSD
 InpTimeframe=5
@@ -30,3 +30,4 @@ InpMaxDDStopPct=0.0
 InpDDRiskCutPct=15.0
 InpDDRiskMul=0.5
 InpSplitOrders=true
+InpMaxLotsPerSymbol=30.0
