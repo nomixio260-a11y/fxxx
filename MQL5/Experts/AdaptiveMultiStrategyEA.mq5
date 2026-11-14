@@ -368,6 +368,10 @@ bool CSymbolTrader::Init(const string sym)
              InpMaxMarginUsePct, InpMinLevelAfterSL);
    risk.SetSplitOrders(InpSplitOrders);
    risk.SetMaxLots(InpMaxLotsPerSymbol);
+   //--- ブローカーの取引の上限を記録する（残高が大きくなったときの備え）
+   PrintFormat("[AMS] %s 取引の上限：1回の注文 %.2f lot、建玉の合計 %.2f lot（0 = 上限なし）、最小 %.2f lot、刻み %.2f lot",
+               sym, SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX), SymbolInfoDouble(sym, SYMBOL_VOLUME_LIMIT),
+               SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN), SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP));
    if(InpEntryMode != ENTRY_WEIGHTED)
      {
       if(!modules.Init(sym, InpTimeframe, InpEntryMode, InpDTEntryDays, InpDTExitDays,
