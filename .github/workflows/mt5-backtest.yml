@@ -167,6 +167,9 @@ jobs:
           # 月 × ルールの損益（どの月にどのルールが負けたかを調べるため）
           rm_out="$RUNNER_TEMP/run_rulemonth.csv"
           if [ -f reports/AMS_rulemonth.csv ]; then tr -d '\r' < reports/AMS_rulemonth.csv > "$rm_out"; fi
+          # 全取引（InpExportDeals=true のときだけ。実運用との突き合わせ用）
+          dl_out="$RUNNER_TEMP/run_deals.csv"
+          if [ -f reports/AMS_bt_deals.csv ]; then tr -d '\r' < reports/AMS_bt_deals.csv > "$dl_out"; fi
           cat "$out"
           git reset -q --hard
           git clean -qfd
@@ -178,6 +181,7 @@ jobs:
             mkdir -p reports/runs
             cp "$out" "reports/runs/$(printf '%04d' "$GITHUB_RUN_NUMBER").txt"
             if [ -f "$rm_out" ]; then cp "$rm_out" "reports/runs/$(printf '%04d' "$GITHUB_RUN_NUMBER")_rulemonth.csv"; fi
+            if [ -f "$dl_out" ]; then cp "$dl_out" "reports/runs/$(printf '%04d' "$GITHUB_RUN_NUMBER")_deals.csv"; fi
             git add reports/runs
             git commit -q -m "ci: result of run ${GITHUB_RUN_NUMBER} [skip ci]"
             if git push -q origin HEAD:"$GITHUB_REF_NAME"; then echo "saved"; exit 0; fi

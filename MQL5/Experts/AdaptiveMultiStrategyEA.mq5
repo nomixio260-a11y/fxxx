@@ -126,6 +126,7 @@ input bool             InpCloseOnOpposite   = true;        // 逆方向のシグ
 input int              InpMaxPositions      = 6;           // 全銘柄合計の最大ポジション数
 input int              InpMaxPerSymbol      = 1;           // 1銘柄あたりの最大ポジション数（分けた注文は1つと数える）
 input bool             InpSplitOrders       = true;        // 1回の注文の上限を超えるロットは、分けて注文する（複利で残高が大きくなったとき用）
+input bool             InpExportDeals       = false;       // バックテストの終わりに、全取引を AMS_bt_deals.csv に書き出す（実運用との突き合わせ用）
 
 input group "=== 資金管理 ==="
 input double           InpRiskPercent       = 3.0;         // 1回の許容損失（有効証拠金の%）
@@ -232,11 +233,11 @@ void LoadState(void)
 //+------------------------------------------------------------------+
 //| 実運用：取引の記録と口座の状態を CSV に書き出す（成績の確認用）          |
 //+------------------------------------------------------------------+
-void ExportLive(void)
+void WriteDeals(const string file, const datetime from)
   {
-   if(!HistorySelect(TimeCurrent() - 400 * 86400, TimeCurrent() + 86400))
+   if(!HistorySelect(from, TimeCurrent() + 86400))
       return;
-   const int fh = FileOpen("AMS_live_deals.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   const int fh = FileOpen(file, FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
    if(fh != INVALID_HANDLE)
      {
       FileWrite(fh, "time", "symbol", "entry", "type", "volume", "price", "profit", "comment", "position");
@@ -255,6 +256,14 @@ void ExportLive(void)
         }
       FileClose(fh);
      }
+  }
+
+//+------------------------------------------------------------------+
+//| 実運用：取引の記録と口座の状態を書き出す                               |
+//+------------------------------------------------------------------+
+void ExportLive(void)
+  {
+   WriteDeals("AMS_live_deals.csv", TimeCurrent() - 400 * 86400);
    //--- 口座の状態は追記していく（残高の推移を見るため）
    const int fa = FileOpen("AMS_live_account.csv", FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
    if(fa != INVALID_HANDLE)
@@ -1378,6 +1387,8 @@ double OnTester(void)
    const bool output = !MQLInfoInteger(MQL_OPTIMIZATION);
    if(output)
       ReportBreakdown();
+   if(output && InpExportDeals)
+      WriteDeals("AMS_bt_deals.csv", 0);
    if(output)
       PrintFormat("[AMS] シグナル %d 件のうち、スプレッドが広いまま見送り %d 件、その他の理由で見送り %d 件",
                   g_sigTotal, g_sigSpread, g_sigOther);
