@@ -126,6 +126,7 @@ input bool             InpCloseOnOpposite   = true;        // 逆方向のシグ
 input int              InpMaxPositions      = 6;           // 全銘柄合計の最大ポジション数
 input int              InpMaxPerSymbol      = 1;           // 1銘柄あたりの最大ポジション数（分けた注文は1つと数える）
 input bool             InpSplitOrders       = true;        // 1回の注文の上限を超えるロットは、分けて注文する（複利で残高が大きくなったとき用）
+input double           InpMaxLotsPerSymbol  = 0.0;         // 1回の取引（1銘柄）の最大ロット（0 = 上限なし）。残高が大きくなったときの約定の滑り・建玉の上限への備え
 input bool             InpWaitCloses        = true;        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
 input bool             InpExportDeals       = false;       // バックテストの終わりに、全取引を AMS_bt_deals.csv に書き出す（実運用との突き合わせ用）
 
@@ -366,6 +367,7 @@ bool CSymbolTrader::Init(const string sym)
    risk.Init(sym, InpMagic, GetPointer(g_trade), InpRiskPercent, InpMaxDailyLossPct, InpAllowMinLot,
              InpMaxMarginUsePct, InpMinLevelAfterSL);
    risk.SetSplitOrders(InpSplitOrders);
+   risk.SetMaxLots(InpMaxLotsPerSymbol);
    if(InpEntryMode != ENTRY_WEIGHTED)
      {
       if(!modules.Init(sym, InpTimeframe, InpEntryMode, InpDTEntryDays, InpDTExitDays,

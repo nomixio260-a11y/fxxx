@@ -26,6 +26,7 @@ private:
    double            m_maxMarginPct;     // 口座全体の必要証拠金の上限（有効証拠金の%）
    double            m_minLevelAfterSL;  // すべての建玉が損切りに達しても残す証拠金維持率（%）
    bool              m_split;           // 1回の注文の上限を超えるロットを、分けて注文するか
+   double            m_maxLots;         // 1回の取引の最大ロット（0 = 上限なし）
    int               m_dayKey;           // 日付（YYYYMMDD）
    double            m_dayStartEquity;
 
@@ -46,6 +47,8 @@ public:
    double            NormalizeVolume(const double lots) const;
    //--- true のとき、1回の注文の上限（SYMBOL_VOLUME_MAX）でロットを切らない（呼び出し側で注文を分ける）
    void              SetSplitOrders(const bool split) { m_split = split; }
+   //--- 1回の取引（1銘柄）の最大ロット（0 = 上限なし）。残高が大きくなっても、現実的に約定できる量に抑えるため
+   void              SetMaxLots(const double lots) { m_maxLots = lots; }
    double            CalcLots(const ENUM_ORDER_TYPE type, const double entry, const double sl,
                               const double riskMultiplier);
    bool              AdjustStops(const ENUM_ORDER_TYPE type, const double entry, double &sl, double &tp) const;
@@ -69,6 +72,7 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
                                    m_maxMarginPct(40.0),
                                    m_minLevelAfterSL(150.0),
                                    m_split(false),
+                                   m_maxLots(0.0),
                                    m_dayKey(0),
                                    m_dayStartEquity(0.0)
   {
@@ -201,6 +205,8 @@ double CRiskManager::CalcLots(const ENUM_ORDER_TYPE type, const double entry, co
       if(lots > xmax)
          lots = NormalizeVolume(xmax);
      }
+   if(m_maxLots > 0.0 && lots > m_maxLots)
+      lots = NormalizeVolume(m_maxLots);
    return(lots);
   }
 
