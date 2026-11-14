@@ -1,0 +1,25 @@
+EO	0	21:30:44.587	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] USDJPY 取引の上限：1回の注文 10.00 lot、建玉の合計 300.00 lot（0 = 上限なし）、最小 0.01 lot、刻み 0.01 lot
+OS	0	21:30:44.587	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] USDJPY 時刻ルール G3F: TKY 0955 から 125 分 SELL（GOTOBI）SL 30 pips 直前30分の値動き>-0.07
+NM	0	21:30:44.587	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] USDJPY 時刻ルール C7: TKY 1700 から 120 分 BUY（MONTHEND）SL 30 pips
+KO	0	21:30:44.587	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] USDJPY 時刻ルール P8: TKY 0800 から 115 分 BUY（GOTOBI）SL 30 pips
+GS	0	21:30:44.587	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] USDJPY 週明けの最初の足=サーバー時間 00:00（NY 17:00 として扱う） いまの東京時間=2026.11.14 06:59
+NQ	0	21:30:44.587	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 銘柄を追加: USDJPY digits=3 最小ロット=0.01
+FK	0	21:30:44.588	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURJPY 取引の上限：1回の注文 10.00 lot、建玉の合計 300.00 lot（0 = 上限なし）、最小 0.01 lot、刻み 0.01 lot
+CK	0	21:30:45.156	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURJPY 時刻ルール P2: TKY 0925 から 30 分 BUY（GOTOBI）SL 20 pips
+HD	0	21:30:45.156	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURJPY 時刻ルール P4: TKY 0925 から 30 分 BUY（FRI）SL 20 pips
+EF	0	21:30:45.156	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURJPY 時刻ルール Q2: TKY 0955 から 125 分 SELL（GOTOBI）SL 25 pips 直前30分の値動き>0.33
+GE	0	21:30:45.156	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURJPY 時刻ルール C3: TKY 1000 から 60 分 SELL（MONTHEND）SL 25 pips
+HH	0	21:30:45.156	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURJPY 週明けの最初の足=サーバー時間 00:00（NY 17:00 として扱う） いまの東京時間=2026.11.14 06:59
+MJ	0	21:30:45.156	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 銘柄を追加: EURJPY digits=3 最小ロット=0.01
+RQ	0	21:30:45.157	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] GBPJPY 取引の上限：1回の注文 10.00 lot、建玉の合計 250.00 lot（0 = 上限なし）、最小 0.01 lot、刻み 0.01 lot
+KK	0	21:30:45.329	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] GBPJPY 時刻ルール C4: TKY 2200 から 120 分 SELL（MONTHSTART）SL 40 pips
+FH	0	21:30:45.329	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] GBPJPY 時刻ルール C6: TKY 1700 から 60 分 SELL（MONTHSTART）SL 40 pips
+CM	0	21:30:45.329	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] GBPJPY 週明けの最初の足=サーバー時間 00:00（NY 17:00 として扱う） いまの東京時間=2026.11.14 06:59
+RO	0	21:30:45.329	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 銘柄を追加: GBPJPY digits=3 最小ロット=0.01
+QL	0	21:30:45.329	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURUSD 取引の上限：1回の注文 10.00 lot、建玉の合計 300.00 lot（0 = 上限なし）、最小 0.01 lot、刻み 0.01 lot
+JR	0	21:30:45.329	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURUSD 時刻ルール A1: LDN 1100 から 120 分 SELL（ALL）SL 30 pips
+KP	0	21:30:45.330	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURUSD 週明けの最初の足=サーバー時間 00:00（NY 17:00 として扱う） いまの東京時間=2026.11.14 06:59
+FM	0	21:30:47.279	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 銘柄を追加: EURUSD digits=5 最小ロット=0.01
+OK	0	21:30:47.292	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 状態を読み込みました：最高値 3000000、停止 なし、月初の残高 3000000（202611）
+CF	0	21:30:47.292	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] エントリーの方式: ENTRY_CALENDAR
+MP	0	21:30:47.292	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 開始 4 銘柄 PERIOD_M5 リスク 5.0% 口座=JPY レバレッジ=1:25 ストップアウト=100%
