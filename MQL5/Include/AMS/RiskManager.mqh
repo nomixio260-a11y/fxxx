@@ -27,6 +27,7 @@ private:
    double            m_minLevelAfterSL;  // すべての建玉が損切りに達しても残す証拠金維持率（%）
    bool              m_split;           // 1回の注文の上限を超えるロットを、分けて注文するか
    double            m_maxLots;         // 1回の取引の最大ロット（0 = 上限なし）
+   bool              m_asyncClose;      // 複数の建玉の決済を同時に出すか
    int               m_dayKey;           // 日付（YYYYMMDD）
    double            m_dayStartEquity;
 
@@ -49,6 +50,8 @@ public:
    void              SetSplitOrders(const bool split) { m_split = split; }
    //--- 1回の取引（1銘柄）の最大ロット（0 = 上限なし）。残高が大きくなっても、現実的に約定できる量に抑えるため
    void              SetMaxLots(const double lots) { m_maxLots = lots; }
+   //--- 複数の建玉を決済するとき、約定を待たずに同時に出す（遅れが積み重ならないように）
+   void              SetAsyncClose(const bool async) { m_asyncClose = async; }
    double            CalcLots(const ENUM_ORDER_TYPE type, const double entry, const double sl,
                               const double riskMultiplier);
    bool              AdjustStops(const ENUM_ORDER_TYPE type, const double entry, double &sl, double &tp) const;
@@ -73,6 +76,7 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
                                    m_minLevelAfterSL(150.0),
                                    m_split(false),
                                    m_maxLots(0.0),
+                                   m_asyncClose(false),
                                    m_dayKey(0),
                                    m_dayStartEquity(0.0)
   {
@@ -326,6 +330,8 @@ bool CRiskManager::CloseAll(const string reason)
 bool CRiskManager::CloseDirection(const ENUM_POSITION_TYPE type, const string reason)
   {
    bool ok = true;
+   if(m_asyncClose)
+      m_trade.SetAsyncMode(true);
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
       if(!m_pos.SelectByIndex(i))
@@ -342,6 +348,7 @@ bool CRiskManager::CloseDirection(const ENUM_POSITION_TYPE type, const string re
       else
          PrintFormat("[AMS] 決済 #%I64u (%s)", ticket, reason);
      }
+   m_trade.SetAsyncMode(false);
    return(ok);
   }
 

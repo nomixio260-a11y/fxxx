@@ -128,7 +128,8 @@ input int              InpMaxPerSymbol      = 1;           // 1銘柄あたり�
 input bool             InpSplitOrders       = true;        // 1回の注文の上限を超えるロットは、分けて注文する（複利で残高が大きくなったとき用）
 input double           InpMaxLotsPerSymbol  = 0.0;         // 1回の取引（1銘柄）の最大ロット（0 = 上限なし）。残高が大きくなったときの約定の滑り・建玉の上限への備え
 input string           InpRuleRiskMul       = "";          // ルールごとのリスクの倍率（例 "C6:0.5,P8:0.5"。書いていないルールは 1.0）。1つのルールに頼りすぎないため
-input bool             InpWaitCloses        = true;        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
+input bool             InpWaitCloses        = true;
+input bool             InpAsyncOrders       = true;        // 分けた注文・複数の建玉の決済を、約定を待たずに同時に出す（遅れが積み重ならないように）        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
 input bool             InpExportDeals       = false;       // バックテストの終わりに、全取引を AMS_bt_deals.csv に書き出す（実運用との突き合わせ用）
 
 input group "=== 資金管理 ==="
@@ -395,6 +396,7 @@ bool CSymbolTrader::Init(const string sym)
              InpMaxMarginUsePct, InpMinLevelAfterSL);
    risk.SetSplitOrders(InpSplitOrders);
    risk.SetMaxLots(InpMaxLotsPerSymbol);
+   risk.SetAsyncClose(InpAsyncOrders);
    //--- ブローカーの取引の上限を記録する（残高が大きくなったときの備え）
    PrintFormat("[AMS] %s 取引の上限：1回の注文 %.2f lot、建玉の合計 %.2f lot（0 = 上限なし）、最小 %.2f lot、刻み %.2f lot",
                sym, SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX), SymbolInfoDouble(sym, SYMBOL_VOLUME_LIMIT),
@@ -821,8 +823,12 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
       const uint rc = g_trade.ResultRetcode();
       if(sent && (rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL))
         {
+         //--- 1本目の約定価格（ずれの記録用）。残りは約定を待たずに同時に出す（遅れを積み重ねないため）
+         const double firstFill = g_trade.ResultPrice();
          double rest = lots - first;
          int    parts = 1;
+         if(InpAsyncOrders && rest > 1e-9)
+            g_trade.SetAsyncMode(true);
          while(rest > 1e-9 && parts < 50)
            {
             const double v = risk.NormalizeVolume(MathMin(rest, maxLot));
@@ -840,10 +846,11 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
             rest -= v;
             parts++;
            }
+         g_trade.SetAsyncMode(false);
          if(parts > 1)
             PrintFormat("[AMS] %s 合計 %.2f lot を %d 本に分けて注文（1回の上限 %.2f lot）", symbol, lots - rest, parts, maxLot);
          //--- 実際の約定価格と、注文時の価格とのずれ（スリッページ）を記録する
-         const double fill = g_trade.ResultPrice();
+         const double fill = firstFill;
          const double slip = (fill > 0.0) ? (isBuy ? fill - entry : entry - fill) / PipSize(symbol) : 0.0;
          PrintFormat("[AMS] %s %s %.2f lot @%s SL=%s TP=%s ずれ=%+.1fpips [%s]", symbol, isBuy ? "BUY" : "SELL", lots,
                      DoubleToString(fill > 0.0 ? fill : entry, digits), DoubleToString(sl, digits),
