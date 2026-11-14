@@ -126,6 +126,7 @@ input bool             InpCloseOnOpposite   = true;        // 逆方向のシグ
 input int              InpMaxPositions      = 6;           // 全銘柄合計の最大ポジション数
 input int              InpMaxPerSymbol      = 1;           // 1銘柄あたりの最大ポジション数（分けた注文は1つと数える）
 input bool             InpSplitOrders       = true;        // 1回の注文の上限を超えるロットは、分けて注文する（複利で残高が大きくなったとき用）
+input bool             InpWaitCloses        = true;        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
 input bool             InpExportDeals       = false;       // バックテストの終わりに、全取引を AMS_bt_deals.csv に書き出す（実運用との突き合わせ用）
 
 input group "=== 資金管理 ==="
@@ -314,6 +315,7 @@ public:
    //--- 保留中の決済（日付の変わり目など、市場が閉じていて決済できないときに再試行する）
    bool              pendCloseBuy;
    bool              pendCloseSell;
+   datetime          pendCloseSince;  // 決済を依頼した時刻
    string            pendCloseReason;
    datetime          lastExitTry;
 
@@ -321,7 +323,7 @@ public:
                                            pendDir(0), pendReg(REGIME_NEUTRAL), pendTag(""), pendMul(1.0), pendSLPips(0.0),
                                            pendSpreadWait(false),
                                            pendUntil(0), lastEntryTry(0), noLots(false), pendPrio(1000000), pendBarTime(0),
-                                           pendCloseBuy(false), pendCloseSell(false), pendCloseReason(""),
+                                           pendCloseBuy(false), pendCloseSell(false), pendCloseSince(0), pendCloseReason(""),
                                            lastExitTry(0) {}
 
    bool              Init(const string sym);
@@ -329,6 +331,8 @@ public:
    void              OnTick(void);       // 段階1：週末前の決済・新しい足の判定・決済
    void              OnTickEnter(void);  // 段階2：新規注文・ストップの管理（全銘柄の決済が済んでから）
    int               PendingPrio(void) const { return(pendDir != 0 ? pendPrio : 1000000); }
+   //--- 決済の途中か（依頼から60秒以内。市場が閉じているなどで長引く場合は、ほかの銘柄を待たせない）
+   bool              Closing(void) const { return((pendCloseBuy || pendCloseSell) && TimeCurrent() - pendCloseSince < 60); }
    int               AdaptSkips(void) const { return(modules.AdaptSkips()); }
    void              AdaptiveReport(void) const { modules.AdaptiveReport(); }
    void              CloseAll(const string reason) { g_trade.SetTypeFillingBySymbol(symbol); risk.CloseAll(reason); }
@@ -603,6 +607,9 @@ void CSymbolTrader::TryEnter(void)
    //--- 決済待ちのポジションがあるあいだは、新規エントリーを待つ
    if(pendCloseBuy || pendCloseSell)
       return;
+   //--- ほかの銘柄が決済の途中なら、それが終わるまで待つ（決済で空く証拠金を、ロットの計算に入れるため）
+   if(InpWaitCloses && g_anyClosing)
+      return;
    int buys = 0, sells = 0;
    risk.CountPositions(buys, sells);
    if(buys + sells >= InpMaxPerSymbol || CountAllPositions() >= InpMaxPositions ||
@@ -703,6 +710,7 @@ void CSymbolTrader::RequestClose(const ENUM_POSITION_TYPE type, const string rea
    else
       pendCloseSell = true;
    pendCloseReason = reason;
+   pendCloseSince  = TimeCurrent();
    lastExitTry     = 0;
   }
 
@@ -827,6 +835,7 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
 // グローバル
 //==================================================================
 CSymbolTrader *g_traders[];
+bool           g_anyClosing  = false;     // どれかの銘柄が決済の途中か
 int            g_minPendPrio = 1000000;   // 保留中のシグナルのうち、最も高い優先順位（時刻ルール）
 
 //+------------------------------------------------------------------+
@@ -1080,6 +1089,10 @@ void ProcessAll(void)
 
    for(int i = 0; i < ArraySize(g_traders); i++)
       g_traders[i].OnTick();
+   g_anyClosing = false;
+   for(int i = 0; i < ArraySize(g_traders); i++)
+      if(g_traders[i].Closing())
+         g_anyClosing = true;
    //--- 新規注文は、保留中のシグナルの優先順位の順に行う（同じ時刻のルールが証拠金を取り合う場合に、結果を決まったものにする）
    const int n = ArraySize(g_traders);
    int order[];
