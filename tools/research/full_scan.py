@@ -57,6 +57,7 @@ def scan_pair(pair):
         wk[i:i + 36] = True
     m_des = D.period_mask(idx, D.DESIGN)
     m_val = D.period_mask(idx, D.VALID)
+    m_fin = D.period_mask(idx, D.FINAL)
     # 保有時間ごとの値動き（足が欠けていない場合だけ。日付の変わり目にかかるものは除外）
     rets = {}
     pos = np.arange(len(df))
@@ -85,7 +86,7 @@ def scan_pair(pair):
             for sl in range(48):
                 ii = slot_idx[sl]
                 ii = ii[fm[ii]]
-                des_i, val_i = ii[m_des[ii]], ii[m_val[ii]]
+                des_i, val_i, fin_i = ii[m_des[ii]], ii[m_val[ii]], ii[m_fin[ii]]
                 for hold in HOLDS:
                     r = rets[hold]
                     n_tests += 1
@@ -103,7 +104,9 @@ def scan_pair(pair):
                                  "hold": hold, "filter": fname, "dir": "買い" if sign > 0 else "売り",
                                  "des_n": n, "des_mean": abs(mean), "des_t": abs(t), "des_pf": pf(d),
                                  "val_n": vn, "val_mean": sign * vraw if vn else 0.0, "val_t": vt,
-                                 "val_net": np.nanmean(v) if vn else 0.0, "val_pf": pf(v) if vn else 0.0})
+                                 "val_net": np.nanmean(v) if vn else 0.0, "val_pf": pf(v) if vn else 0.0,
+                                 "fin_n": int((~np.isnan(r[fin_i])).sum()), "fin_net": float(np.nanmean(sign * r[fin_i] - cost)) if len(fin_i) else 0.0,
+                                 "fin_pf": pf(sign * r[fin_i] - cost) if len(fin_i) else 0.0})
     print(pair, "done", file=sys.stderr, flush=True)
     return rows, n_tests
 

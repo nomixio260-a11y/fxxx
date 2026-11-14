@@ -61,6 +61,7 @@ def scan(events=None):
                 r = np.where(bad, np.nan, r)
                 m_des = D.period_mask(fix, D.DESIGN)
                 m_val = D.period_mask(fix, D.VALID)
+                m_fin = D.period_mask(fix, D.FINAL)
                 for fname, fm in filters.items():
                     des = S.stats(r[fm & m_des], 0.0)
                     if des["n"] < 60 or abs(des["t"]) < 3.0:
@@ -70,10 +71,12 @@ def scan(events=None):
                     if d2["net"] <= 0:
                         continue
                     v = S.stats(sign * r[fm & m_val], cost)
+                    fn = S.stats(sign * r[fm & m_fin], cost)
                     rows.append({"pair": pair, "event": name, "clock": clock, "fix": f"{hh:02d}:{mm:02d}",
                                  "win": f"{a:+d}〜{b:+d}分", "filter": fname, "dir": "買い" if sign > 0 else "売り",
                                  "des_n": d2["n"], "des_mean": d2["mean"], "des_t": d2["t"], "des_pf": d2["pf"],
-                                 "val_n": v["n"], "val_mean": v["mean"], "val_t": v["t"], "val_net": v["net"], "val_pf": v["pf"]})
+                                 "val_n": v["n"], "val_mean": v["mean"], "val_t": v["t"], "val_net": v["net"], "val_pf": v["pf"],
+                                 "fin_n": fn["n"], "fin_net": fn["net"], "fin_pf": fn["pf"], "fin_t": fn["t"]})
         print(pair, "done", file=sys.stderr, flush=True)
     return pd.DataFrame(rows)
 
