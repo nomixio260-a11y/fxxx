@@ -1026,9 +1026,9 @@ void ReportBreakdown(void)
    if(!HistorySelect(0, TimeCurrent()))
       return;
 
-   string sN[], rN[], lN[];
-   int    sT[], sW[], rT[], rW[], lT[], lW[];
-   double sP[], rP[], lP[];
+   string sN[], rN[], lN[], mN[];
+   int    sT[], sW[], rT[], rW[], lT[], lW[], mT[], mW[];
+   double sP[], rP[], lP[], mP[];
    double netProfit = 0.0, costPerPip = 0.0;   // costPerPip: 全取引で1pipsずつ不利に約定した場合の損失額
    double tP[], tC[];                           // 取引ごとの損益と、1pips 不利になったときの金額（コスト込み PF の計算用）
    int    nT = 0;
@@ -1081,6 +1081,10 @@ void ReportBreakdown(void)
       AddStat(sN, sT, sW, sP, parts[1], profit);
       AddStat(rN, rT, rW, rP, parts[2], profit);
       AddStat(lN, lT, lW, lP, parts[3], profit);
+      //--- 月 × ルールの損益（どの月にどのルールが負けたかを調べるため）
+      MqlDateTime md;
+      TimeToStruct((datetime)HistoryDealGetInteger(deal, DEAL_TIME), md);
+      AddStat(mN, mT, mW, mP, StringFormat("%04d-%02d|%s", md.year, md.mon, parts[3]), profit);
      }
 
    int fh = INVALID_HANDLE;
@@ -1132,6 +1136,18 @@ void ReportBreakdown(void)
      }
    if(fh != INVALID_HANDLE)
       FileClose(fh);
+   //--- 月 × ルールの損益（"MM|ルール,取引数,損益"）
+   if(!MQLInfoInteger(MQL_OPTIMIZATION))
+     {
+      const int fm = FileOpen("AMS_rulemonth.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+      if(fm != INVALID_HANDLE)
+        {
+         FileWrite(fm, "month_rule", "trades", "profit");
+         for(int i = 0; i < ArraySize(mN); i++)
+            FileWrite(fm, mN[i], mT[i], DoubleToString(mP[i], 0));
+         FileClose(fm);
+        }
+     }
   }
 
 //+------------------------------------------------------------------+
