@@ -95,14 +95,15 @@ Write-Host "Backtest: $symbol H1 $from - $to (mode=$mode, model=$model, executio
 # ログファイルの新しい行だけを表示する（MT5 のログは UTF-16）
 $script:shown = @{}
 function Show-NewLines([string]$pattern, [string]$tag) {
-  $found = @()
+  # 大きなログでも遅くならないように、新しい行はリストに集める（配列への += は行数の2乗の時間がかかる）
+  $found = New-Object System.Collections.Generic.List[string]
   Get-ChildItem $pattern -ErrorAction SilentlyContinue | ForEach-Object {
     $lines = @(Get-Content $_.FullName -Encoding Unicode -ErrorAction SilentlyContinue)
     $start = if ($script:shown.ContainsKey($_.FullName)) { $script:shown[$_.FullName] } else { 0 }
-    for ($i = $start; $i -lt $lines.Count; $i++) { Write-Host "[$tag] $($lines[$i])"; $found += $lines[$i] }
+    for ($i = $start; $i -lt $lines.Count; $i++) { Write-Host "[$tag] $($lines[$i])"; $found.Add($lines[$i]) }
     $script:shown[$_.FullName] = $lines.Count
   }
-  return $found
+  return ,$found.ToArray()
 }
 
 # 画面のスクリーンショット（ダイアログで止まっていないかの確認用）
@@ -129,8 +130,7 @@ try {
   # 実行中のログを30秒ごとに表示し、致命的なエラーが出たら早めに止める
   while (-not $p.WaitForExit(30000)) {
     $new  = @(Show-NewLines "$dir\logs\*.log" 'terminal')
-    # 最適化中はエージェントのログが膨大になるので表示しない
-    if ($mode -ne 'optimize') { $new += @(Show-NewLines "$dir\Tester\Agent-*\logs\*.log" 'tester') }
+    # テスターのログは、取引のたびに行が増えて膨大になるため、テスト中は表示しない（終わった後に最後の部分だけ表示する）
     $fatal = $new | Where-Object {
       ($_ -match 'authorization on .* failed') -or ($_ -match "tester didn't start") -or
       ($_ -match 'tester not started') -or ($_ -match 'symbol .* not (exist|found)')
@@ -155,7 +155,11 @@ try {
     }
   }
   Show-NewLines "$dir\logs\*.log" 'terminal' | Out-Null
-  if ($mode -ne 'optimize') { Show-NewLines "$dir\Tester\Agent-*\logs\*.log" 'tester' | Out-Null }
+  if ($mode -ne 'optimize') {
+    Get-ChildItem "$dir\Tester\Agent-*\logs\*.log" -ErrorAction SilentlyContinue | ForEach-Object {
+      Get-Content $_.FullName -Encoding Unicode -Tail 300 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "[tester] $_" }
+    }
+  }
 } finally {
   Remove-Item $conf -ErrorAction SilentlyContinue   # パスワードを含むので必ず削除
 }
