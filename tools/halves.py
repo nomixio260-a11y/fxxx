@@ -19,6 +19,8 @@ def summary(run):
     out = []
     for name, lo, hi in (("前半", "2021-11", "2024-10"), ("後半", "2024-11", "2099-12"), ("5年", "2021-11", "2099-12")):
         p = [x for k, x in v if lo <= k <= hi]
+        if not p:
+            continue
         g = 1.0
         peak, dd = 1.0, 0.0
         for x in p:
