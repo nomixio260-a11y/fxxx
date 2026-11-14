@@ -87,7 +87,7 @@ def main():
     os.environ["AMS_TAG"] = "_holiday"
     F.main()
     res = pd.read_csv(os.path.join(D.ROOT, "reports", "research", "full_scan_holiday_all.csv"))
-    if len(res):
+    if len(res) and "val_net" in res:
         ok = res[(res.val_net > 0) & (res.val_pf >= 1.2) & (res.val_t >= 2.0)]
         print("\n2024年11月〜の成績（検証通過分）")
         for _, r in ok.iterrows():

@@ -23,7 +23,7 @@ import seasonality as S  # noqa: E402
 
 HOLDS = [30, 60, 120]          # 分
 CLOCKS = ["tky", "ldn", "ny"]
-DES_T = 4.0
+DES_T = float(os.environ.get("AMS_DES_T", "4.0"))
 
 
 def stats_vec(x):
@@ -132,7 +132,7 @@ def main():
              "- 最終確認期間（2024年11月〜）は見ていません。", "",
              "| 銘柄 | 時計 | 入る時刻 | 保有 | 日の条件 | 向き | 設計 回数 | 設計 平均pips | 設計 t | 設計 PF | 検証 回数 | 検証 平均pips | 検証 t | 検証 PF | 検証通過 |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    for i, r in res.sort_values("des_t", ascending=False).iterrows():
+    for i, r in (res.sort_values("des_t", ascending=False) if len(res) else res).iterrows():
         mark = "○" if (r.val_net > 0 and r.val_pf >= 1.2 and r.val_t >= 2.0) else ""
         lines.append(f"| {r.pair} | {r.clock} | {r.time} | {r.hold}分 | {r['filter']} | {r.dir} | {r.des_n} | {r.des_mean:+.1f} | {r.des_t:.1f} | "
                      f"{r.des_pf:.2f} | {r.val_n} | {r.val_mean:+.1f} | {r.val_t:.1f} | {r.val_pf:.2f} | {mark} |")
