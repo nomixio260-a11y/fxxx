@@ -129,7 +129,8 @@ input bool             InpSplitOrders       = true;        // 1回の注文の�
 input double           InpMaxLotsPerSymbol  = 0.0;         // 1回の取引（1銘柄）の最大ロット（0 = 上限なし）。残高が大きくなったときの約定の滑り・建玉の上限への備え
 input string           InpRuleRiskMul       = "";          // ルールごとのリスクの倍率（例 "C6:0.5,P8:0.5"。書いていないルールは 1.0）。1つのルールに頼りすぎないため
 input bool             InpWaitCloses        = true;
-input bool             InpAsyncOrders       = true;        // 分けた注文・複数の建玉の決済を、約定を待たずに同時に出す（遅れが積み重ならないように）        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
+input bool             InpAsyncOrders       = true;
+input int              InpLeadSec           = 0;           // 先回りの秒数：時刻ルールの注文・決済を、決めた時刻のこの秒数前に出す（注文の遅れを吸収するため。0 で無効）        // 分けた注文・複数の建玉の決済を、約定を待たずに同時に出す（遅れが積み重ならないように）        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
 input bool             InpExportDeals       = false;       // バックテストの終わりに、全取引を AMS_bt_deals.csv に書き出す（実運用との突き合わせ用）
 
 input group "=== 資金管理 ==="
@@ -415,6 +416,7 @@ bool CSymbolTrader::Init(const string sym)
          return(false);
         }
       modules.SetAdaptive(InpEntryMode == ENTRY_CALENDAR ? InpAdaptWindow : 0, InpAdaptMinTrades, InpAdaptMinPF);
+      modules.SetLead(InpLeadSec);
       //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
       const int tod = modules.OpenTOD();
       if(tod >= 0)
@@ -441,7 +443,8 @@ bool CSymbolTrader::WeekendCloseTime(void)
 //+------------------------------------------------------------------+
 bool CSymbolTrader::IsNewBar(void)
   {
-   const datetime t = iTime(symbol, InpTimeframe, 0);
+   //--- 先回りの秒数があるときは、次の足の始まりのその秒数前に「新しい足」とみなす
+   const datetime t = (InpEntryMode == ENTRY_CALENDAR && InpLeadSec > 0) ? modules.BarTime() : iTime(symbol, InpTimeframe, 0);
    if(t == 0 || t == lastBar)
       return(false);
    lastBar = t;
@@ -601,10 +604,11 @@ void CSymbolTrader::OnBar(void)
    pendReg   = reg;
    pendTag   = tag;
    pendMul   = riskMul * ((InpEntryMode == ENTRY_CALENDAR) ? RuleRiskMul(tag) : 1.0);
-   pendUntil = iTime(symbol, InpTimeframe, 0) + PeriodSeconds(InpTimeframe) / 4;
+   const datetime barT = (InpEntryMode == ENTRY_CALENDAR) ? modules.BarTime() : iTime(symbol, InpTimeframe, 0);
+   pendUntil = barT + PeriodSeconds(InpTimeframe) / 4;
    pendSpreadWait = false;
    pendPrio       = (InpEntryMode == ENTRY_CALENDAR) ? modules.PendingRulePrio() : 1000000;
-   pendBarTime    = iTime(symbol, InpTimeframe, 0);
+   pendBarTime    = barT;
    pendSLPips     = (InpEntryMode == ENTRY_CALENDAR) ? modules.PendingRuleSL()
                     : ((InpEntryMode == ENTRY_TOKYO_FIX) ? InpFixStopPips : 0.0);
    g_sigTotal++;

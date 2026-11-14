@@ -55,6 +55,7 @@ class CModuleSet
 private:
    string            m_symbol;
    ENUM_TIMEFRAMES   m_tf;
+   int               m_leadSec;
    ENUM_AMS_ENTRY_MODE m_mode;
 
    int               m_hRSI;          // 押し目用 RSI
@@ -155,6 +156,9 @@ public:
    int               OpenTOD(void) const { return(m_openTOD); }
    void              SetTokyoFix(const int entryHHMM, const int exitHHMM, const bool gotobiOnly, const int dir);
    void              AddHolidays(const string list);
+   //--- 先回りの秒数：時刻ルールの判定・決済を、足の始まりのこの秒数前に行う（注文の遅れを吸収するため）
+   void              SetLead(const int sec) { m_leadSec = MathMax(sec, 0); }
+   datetime          BarTime(void) const;
    int               SetRules(const string rules);
    double            PendingRuleSL(void) const;
    void              SetAdaptive(const int window, const int minTrades, const double minPF);
@@ -175,6 +179,7 @@ public:
 //+------------------------------------------------------------------+
 CModuleSet::CModuleSet(void) : m_symbol(""),
                                m_tf(PERIOD_CURRENT),
+                               m_leadSec(0),
                                m_mode(ENTRY_WEIGHTED),
                                m_hRSI(INVALID_HANDLE),
                                m_hEmaFast(INVALID_HANDLE),
@@ -315,7 +320,7 @@ void CModuleSet::MarkEntered(void)
      {
       //--- 決済の時刻 = シグナルを出した足の始まり + 保有時間
       m_activeRule  = m_pendRule;
-      m_activeUntil = iTime(m_symbol, m_tf, 0) + m_ruleHold[m_pendRule] * 60;
+      m_activeUntil = BarTime() + m_ruleHold[m_pendRule] * 60;
      }
   }
 
@@ -393,7 +398,7 @@ bool CModuleSet::ExitSignal(const ENUM_POSITION_TYPE type)
          //    復元できないポジションは決済する。
          if(m_activeUntil == 0)
             RestoreActive();
-         return(m_activeUntil == 0 || iTime(m_symbol, m_tf, 0) >= m_activeUntil);
+         return(m_activeUntil == 0 || BarTime() >= m_activeUntil);
       case ENTRY_LONDON_BO:
          //--- 当日中（NY の昼〜引け）に決済する
          return(HourIn(h, m_lbExit, 17));
@@ -909,13 +914,29 @@ bool CModuleSet::RuleDayOK(const int filter, const datetime local, const int clo
 //+------------------------------------------------------------------+
 //| 時刻ルールのシグナル：いまの足の始まりが、ルールの入る時刻と一致したら     |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| 判定に使う「いまの足の始まりの時刻」。先回りの秒数があるときは、          |
+//| 次の足の始まりのその秒数前から、次の足として扱う                         |
+//+------------------------------------------------------------------+
+datetime CModuleSet::BarTime(void) const
+  {
+   const datetime t0 = iTime(m_symbol, m_tf, 0);
+   if(m_leadSec <= 0 || m_mode != ENTRY_CALENDAR)
+      return(t0);
+   const int per = PeriodSeconds(m_tf);
+   if(per <= 0)
+      return(t0);
+   const datetime v = (datetime)(((long)(TimeCurrent() + m_leadSec) / per) * per);
+   return(v > t0 ? v : t0);
+  }
+
 double CModuleSet::CalendarSignal(void)
   {
    m_pendRule = -1;
    if(m_openTOD < 0 || m_ruleCount == 0)
       return(0.0);
    UpdateVirtual();
-   const datetime now = iTime(m_symbol, m_tf, 0);
+   const datetime now = BarTime();
    double signal = 0.0;
    for(int k = 0; k < m_ruleCount; k++)
      {
@@ -959,8 +980,12 @@ bool CModuleSet::PreMoveOK(const int minutes, const double thr, const bool below
    const int per = PeriodSeconds(m_tf) / 60;
    if(per <= 0 || minutes % per != 0)
       return(false);
-   const double now  = iOpen(m_symbol, m_tf, 0);
-   const double prev = iOpen(m_symbol, m_tf, minutes / per);
+   //--- 先回りしているときは、まだ次の足が始まっていないので、いまの価格を使う
+   const datetime bt   = BarTime();
+   const bool     early = (bt > iTime(m_symbol, m_tf, 0));
+   const double   now  = early ? SymbolInfoDouble(m_symbol, SYMBOL_BID) : iOpen(m_symbol, m_tf, 0);
+   const double   prev = early ? iOpen(m_symbol, m_tf, iBarShift(m_symbol, m_tf, bt - minutes * 60, false))
+                               : iOpen(m_symbol, m_tf, minutes / per);
    double rng = 0.0;
    int    n   = 0;
    for(int i = 1; i <= 24; i++)
@@ -1070,10 +1095,10 @@ void CModuleSet::OpenVirtual(const int k, const int dir)
    const double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
    m_vOpen[k]   = true;
    m_vDir[k]    = dir;
-   m_vEntry[k]  = iOpen(m_symbol, m_tf, 0);
+   m_vEntry[k]  = (BarTime() > iTime(m_symbol, m_tf, 0)) ? bid : iOpen(m_symbol, m_tf, 0);
    m_vSLpips[k] = RuleSL(k);
    m_vSpread[k] = (pip > 0.0 && ask > bid) ? (ask - bid) / pip : 0.0;
-   m_vUntil[k]  = iTime(m_symbol, m_tf, 0) + m_ruleHold[k] * 60;
+   m_vUntil[k]  = BarTime() + m_ruleHold[k] * 60;
   }
 
 //+------------------------------------------------------------------+
