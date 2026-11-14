@@ -3,7 +3,8 @@
 
 入力：
 - 実運用：reports/live/AMS_live_deals.csv
-- バックテスト：reports/runs/NNNN_deals.csv（mt5-backtest を InpExportDeals=true で、同じ期間・同じ設定で実行したもの）
+- バックテスト：reports/runs/NNNN_deals.csv（mt5-backtest を InpExportDeals=true・同じ設定で実行したもの。
+  短い期間ではテスターが履歴を読み込めないことがあるため、2024.11.01 から実運用の最後の日までを流す）
 突き合わせ：ルール名（コメントの最後）と銘柄が同じで、入った時刻の差が5分以内の取引を同じ取引とみなす。
 出力：取引ごとの入値・決済値・pips の差、片方にしかない取引、ルールごとの合計 → reports/live/compare_NNNN.md
 
