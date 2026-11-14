@@ -143,6 +143,8 @@ input double           InpDDRiskCutPct      = 0.0;         // 最高値からの
 input double           InpDDRiskMul         = 0.5;         // 上の条件のときのリスクの倍率
 input double           InpMonthTargetPct    = 0.0;         // [月間目標] その月の利益（月初の残高比）がこの%に届いたら、月末までリスクを下げる（0で無効）
 input double           InpMonthLockMul      = 0.0;         // [月間目標] 届いた後のリスクの倍率（0 = その月は新規エントリーをしない）
+input double           InpMonthStopPct      = 0.0;         // [月間の損失の上限] その月の損失（月初の残高比）がこの%に達したら、月末までリスクを下げる（0で無効）
+input double           InpMonthStopMul      = 0.0;         // [月間の損失の上限] 達した後のリスクの倍率（0 = その月は新規エントリーをしない）
 input double           InpMaxDDStopPct      = 50.0;        // 最高値からの下落がこの%を超えたら全決済して停止（0で無効）
 input double           InpMaxMarginUsePct   = 40.0;        // 必要証拠金の合計の上限（有効証拠金の%。強制ロスカット防止）
 input double           InpMinLevelAfterSL   = 150.0;       // すべての建玉が損切りに達しても残す証拠金維持率（%。OANDA のロスカットは100%）
@@ -173,6 +175,7 @@ double g_peakEquity = 0.0;
 double g_monthStartBal = 0.0;   // 月初の残高（月間目標の判定用）
 int    g_monthKey      = 0;     // いまの月（YYYYMM、サーバー時間）
 int    g_sigLock       = 0;     // 月間目標に届いたため見送ったシグナルの数
+int    g_sigMonthStop  = 0;     // 月間の損失の上限に達したため見送ったシグナルの数
 
 //+------------------------------------------------------------------+
 //| その月の損益率（%、月初の残高比。含み損益も含める）                     |
@@ -669,6 +672,16 @@ void CSymbolTrader::TryEnter(void)
          return;
         }
       mul *= InpMonthLockMul;
+     }
+   //--- 月間の損失の上限：その月の損失が上限に達したら、月末までリスクを下げる（または新規をやめる）。最悪の月を浅くするため
+   if(InpMonthStopPct > 0.0 && MonthToDatePct() <= -InpMonthStopPct)
+     {
+      if(InpMonthStopMul <= 0.0)
+        {
+         g_sigMonthStop++;
+         return;
+        }
+      mul *= InpMonthStopMul;
      }
    if(Open(dir > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, pendReg, pendTag, mul))
      {
@@ -1252,6 +1265,7 @@ void ReportBreakdown(void)
       FileWrite(fh, "signal", "skip_adapt", adaptSkips, 0, "", "0");
    if(fh != INVALID_HANDLE)
       FileWrite(fh, "signal", "skip_monthlock", g_sigLock, 0, "", "0");
+      FileWrite(fh, "signal", "skip_monthstop", g_sigMonthStop, 0, "", "0");
    Print("[AMS] ===== 銘柄別・相場状況別・ロジック別の成績 =====");
    WriteStats(fh, "symbol", sN, sT, sW, sP);
    WriteStats(fh, "regime", rN, rT, rW, rP);

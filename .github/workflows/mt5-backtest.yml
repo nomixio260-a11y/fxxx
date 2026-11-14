@@ -37,6 +37,10 @@ on:
         description: "取引する銘柄（カンマ区切り。空なら EA の既定値）"
         required: false
         default: ""
+      preset:
+        description: "実運用と同じプリセットを読み込む（MQL5/Presets のファイル名。inputs で個別に上書きできる）"
+        required: false
+        default: ""
       inputs:
         description: "EA の入力を固定値にする（例: InpRiskPercent=5;InpEntryThreshold=0.5）"
         required: false
@@ -88,6 +92,7 @@ jobs:
       BT_PERIOD: ${{ inputs.period || 'H1' }}
       BT_SYMBOLS: ${{ inputs.symbols }}
       BT_INPUTS: ${{ inputs.inputs }}
+      BT_PRESET: ${{ inputs.preset }}
       BT_SAMPLE: ${{ inputs.sample }}
       BT_EXECUTION: ${{ inputs.execution }}
       BT_DEPOSIT: ${{ inputs.deposit }}
@@ -156,7 +161,7 @@ jobs:
         run: |
           out="$RUNNER_TEMP/run_result.txt"
           {
-            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} inputs=${BT_INPUTS:-default}"
+            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} deposit=${BT_DEPOSIT:-1000000} preset=${BT_PRESET:-none} inputs=${BT_INPUTS:-default}"
             cat reports/result_line.txt 2>/dev/null || echo "RESULT なし（テスト失敗）"
             # 月ごとの損益率（モンテカルロ分析などに使う）："MONTHLY 2015-01:+1.23,2015-02:-0.45,..."
             if [ -f reports/AMS_monthly.csv ]; then

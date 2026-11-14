@@ -21,18 +21,31 @@ if (-not $tfValue) { throw "未対応の時間足: $period" }
 $reportName = "AMS_$($symbol -replace '[^A-Za-z0-9]', '_')_$period"
 
 # EA の入力値の上書き（[TesterInputs]）。書式: 名前=値||開始||刻み||終了||Y/N
-$inputLines = @("InpTimeframe=$tfValue||$tfValue||0||$tfValue||N")
-if ($env:BT_SYMBOLS) { $inputLines += "InpSymbols=$($env:BT_SYMBOLS)" }
+# 順番：BT_PRESET（実運用と同じプリセットファイル）→ BT_SYMBOLS → BT_INPUTS（あとのものが優先）
+$kv = [ordered]@{}
+if ($env:BT_PRESET) {
+  $pf = Join-Path $repo "MQL5\Presets\$($env:BT_PRESET)"
+  if (-not (Test-Path $pf)) { throw "プリセットが見つかりません: $($env:BT_PRESET)" }
+  foreach ($line in (Get-Content $pf)) {
+    if ($line -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$' -and -not $line.TrimStart().StartsWith(';')) { $kv[$matches[1]] = $matches[2] }
+  }
+  Write-Host "プリセット $($env:BT_PRESET) を読み込みました（$($kv.Count) 項目）"
+}
+if ($env:BT_SYMBOLS) { $kv['InpSymbols'] = $env:BT_SYMBOLS }
 # BT_INPUTS: 「名前=値;名前=値」で任意の入力を固定値にする
 if ($env:BT_INPUTS) {
-  foreach ($kv in ($env:BT_INPUTS -split ';')) {
-    if ($kv -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$') {
-      $k = $matches[1]; $v = $matches[2]
-      # 数値・true/false は「値||開始||刻み||終了||N」、文字列は「名前=値」だけを書く（|| が値の一部として扱われるため）
-      if ($v -match '^-?[0-9.]+$' -or $v -match '^(true|false)$') { $inputLines += "$k=$v||$v||0||$v||N" }
-      else { $inputLines += "$k=$v" }
-    }
+  foreach ($item in ($env:BT_INPUTS -split ';')) {
+    if ($item -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$') { $kv[$matches[1]] = $matches[2] }
   }
+}
+$kv.Remove('InpTimeframe')   # 時間足は Period の指定に合わせる
+$inputLines = @("InpTimeframe=$tfValue||$tfValue||0||$tfValue||N")
+foreach ($k in $kv.Keys) {
+  $v = $kv[$k]
+  if ($v -eq '') { $inputLines += "$k="; continue }
+  # 数値・true/false は「値||開始||刻み||終了||N」、文字列は「名前=値」だけを書く（|| が値の一部として扱われるため）
+  if ($v -match '^-?[0-9.]+$' -or $v -match '^(true|false)$') { $inputLines += "$k=$v||$v||0||$v||N" }
+  else { $inputLines += "$k=$v" }
 }
 
 # 最適化モード：前半で最適化（遺伝的アルゴリズム・カスタム評価値）、後半をフォワード検証に使う
