@@ -169,6 +169,7 @@ public:
    double            EntrySignal(const double meanRevSignal);
    bool              ExitSignal(const ENUM_POSITION_TYPE type);
    void              MarkEntered(void);
+   void              RestoreActive(void);
   };
 
 //+------------------------------------------------------------------+
@@ -319,6 +320,36 @@ void CModuleSet::MarkEntered(void)
   }
 
 //+------------------------------------------------------------------+
+//| 再起動のあと：保有中のポジションのコメント "…|ルール名" と建てた時刻から、  |
+//| 決済の時刻を復元する                                                  |
+//+------------------------------------------------------------------+
+void CModuleSet::RestoreActive(void)
+  {
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      const ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || PositionGetString(POSITION_SYMBOL) != m_symbol)
+         continue;
+      string parts[];
+      if(StringSplit(PositionGetString(POSITION_COMMENT), '|', parts) < 4)
+         continue;
+      for(int k = 0; k < m_ruleCount; k++)
+        {
+         if(m_ruleName[k] != parts[3])
+            continue;
+         const datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
+         const int      per    = PeriodSeconds(m_tf);
+         const datetime bar    = (per > 0) ? (datetime)(opened - opened % per) : opened;
+         m_activeRule  = k;
+         m_activeUntil = bar + m_ruleHold[k] * 60;
+         PrintFormat("[AMS] %s 再起動後の復元：ルール %s のポジション（%s に建てた）を %s に決済します", m_symbol, m_ruleName[k],
+                     TimeToString(opened), TimeToString(m_activeUntil));
+         return;
+        }
+     }
+  }
+
+//+------------------------------------------------------------------+
 //| エントリーのシグナル（確定足で判定）。+1 買い / -1 売り / 0 なし         |
 //| アジア時間の逆張りは、既存の逆張りシグナル（±0.5 / ±1）をそのまま返す     |
 //+------------------------------------------------------------------+
@@ -357,7 +388,11 @@ bool CModuleSet::ExitSignal(const ENUM_POSITION_TYPE type)
    switch(m_mode)
      {
       case ENTRY_CALENDAR:
-         //--- ルールの保有時間が過ぎたら決済する（決済時刻が不明なポジションも決済する）
+         //--- ルールの保有時間が過ぎたら決済する。
+         //    EA の再起動などで決済時刻が分からなくなったら、ポジションのコメント（ルール名）と建てた時刻から復元する。
+         //    復元できないポジションは決済する。
+         if(m_activeUntil == 0)
+            RestoreActive();
          return(m_activeUntil == 0 || iTime(m_symbol, m_tf, 0) >= m_activeUntil);
       case ENTRY_LONDON_BO:
          //--- 当日中（NY の昼〜引け）に決済する

@@ -18,6 +18,9 @@ DATA = os.path.join(ROOT, "data")
 CACHE = os.path.join(DATA, "cache")
 
 PAIRS = ["USDJPY", "EURUSD", "EURJPY", "GBPJPY", "AUDJPY", "GBPUSD"]
+# 環境変数 AMS_PAIRS（カンマ区切り）で、調べる銘柄を差し替えられる（例：AMS_PAIRS=NZDJPY,CADJPY）
+if os.environ.get("AMS_PAIRS"):
+    PAIRS = [p.strip() for p in os.environ["AMS_PAIRS"].split(",") if p.strip()]
 
 # 期間の役割（固定。変えない）
 DESIGN = ("2015-01-01", "2022-01-01")

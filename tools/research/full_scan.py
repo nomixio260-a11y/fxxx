@@ -122,7 +122,7 @@ def scan():
 def main():
     res, n_tests = scan()
     out_dir = os.path.join(D.ROOT, "reports", "research")
-    res.to_csv(os.path.join(out_dir, "full_scan_all.csv"), index=False)
+    res.to_csv(os.path.join(out_dir, "full_scan" + os.environ.get("AMS_TAG", "") + "_all.csv"), index=False)
     ok = (res["val_net"] > 0) & (res["val_pf"] >= 1.2) & (res["val_t"] >= 2.0) if len(res) else []
     passed = res[ok] if len(res) else res
     lines = ["# 5分足・全時間帯の偏りの探索", "",
@@ -137,7 +137,7 @@ def main():
         lines.append(f"| {r.pair} | {r.clock} | {r.time} | {r.hold}分 | {r['filter']} | {r.dir} | {r.des_n} | {r.des_mean:+.1f} | {r.des_t:.1f} | "
                      f"{r.des_pf:.2f} | {r.val_n} | {r.val_mean:+.1f} | {r.val_t:.1f} | {r.val_pf:.2f} | {mark} |")
     text = "\n".join(lines) + "\n"
-    open(os.path.join(out_dir, "full_scan.md"), "w", encoding="utf-8").write(text)
+    open(os.path.join(out_dir, "full_scan" + os.environ.get("AMS_TAG", "") + ".md"), "w", encoding="utf-8").write(text)
     print("\n".join(lines[:6]))
     print("\n".join(l for l in lines[8:] if l.endswith("○ |")))
 

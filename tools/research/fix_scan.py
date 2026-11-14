@@ -84,7 +84,7 @@ def scan(events=None):
 def main():
     second = len(sys.argv) > 1 and sys.argv[1] == "2"
     events = EVENTS2 if second else EVENTS
-    tag = "fix_scan2" if second else "fix_scan"
+    tag = ("fix_scan2" if second else "fix_scan") + os.environ.get("AMS_TAG", "")   # 例：AMS_TAG=_new で別のファイルに出す
     res = scan(events)
     n_tests = len(D.PAIRS) * len(WINDOWS) * (len(events) * 8 + 1)
     out_dir = os.path.join(D.ROOT, "reports", "research")
