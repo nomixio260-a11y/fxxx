@@ -130,7 +130,7 @@ input double           InpMaxLotsPerSymbol  = 0.0;         // 1回の取引（1�
 input string           InpRuleRiskMul       = "";          // ルールごとのリスクの倍率（例 "C6:0.5,P8:0.5"。書いていないルールは 1.0）。1つのルールに頼りすぎないため
 input bool             InpWaitCloses        = true;
 input bool             InpAsyncOrders       = true;
-input int              InpLeadSec           = 0;           // 先回りの秒数：時刻ルールの注文・決済を、決めた時刻のこの秒数前に出す（注文の遅れを吸収するため。0 で無効）        // 分けた注文・複数の建玉の決済を、約定を待たずに同時に出す（遅れが積み重ならないように）        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
+input int              InpLeadSec           = 0;           // 先回りの秒数：時刻ルールの注文・決済を、決めた時刻のこの秒数前に出す（0 = 使わない、-1 = 実際の注文の遅れを測って自動で決める）        // 分けた注文・複数の建玉の決済を、約定を待たずに同時に出す（遅れが積み重ならないように）        // ほかの銘柄の決済が終わるまで、新規注文を待つ（決済で空く証拠金をロットの計算に入れるため）
 input bool             InpExportDeals       = false;       // バックテストの終わりに、全取引を AMS_bt_deals.csv に書き出す（実運用との突き合わせ用）
 
 input group "=== 資金管理 ==="
@@ -291,6 +291,36 @@ int    g_sigOther   = 0;       // その他の理由（取引時間外・上限�
 
 int CountAllPositions(void);
 
+void ApplyAutoLead(void);
+//+------------------------------------------------------------------+
+//| 注文の遅れを記録し、先回りの秒数を自動で決める（InpLeadSec = -1 のとき） |
+//| 直近50回の遅れの中央値（秒、切り捨て、0〜15秒）を使う                   |
+//+------------------------------------------------------------------+
+void RecordLatency(const double sec)
+  {
+   const int W = 50;
+   if(ArraySize(g_lat) != W)
+      ArrayResize(g_lat, W);
+   g_lat[g_latN % W] = MathMax(sec, 0.0);
+   g_latN++;
+   if(InpLeadSec >= 0 || g_latN < 5)
+      return;
+   const int n = MathMin(g_latN, W);
+   double tmp[];
+   ArrayResize(tmp, n);
+   for(int i = 0; i < n; i++)
+      tmp[i] = g_lat[i];
+   ArraySort(tmp);
+   const double med = tmp[n / 2];
+   const int lead = (int)MathMin(MathMax(MathFloor(med), 0.0), 15.0);
+   if(lead != g_autoLead)
+     {
+      g_autoLead = lead;
+      PrintFormat("[AMS] 注文の遅れの中央値 %.2f 秒 → 先回りの秒数を %d 秒にします", med, lead);
+      ApplyAutoLead();
+     }
+  }
+
 //+------------------------------------------------------------------+
 //| ルールごとのリスクの倍率（InpRuleRiskMul から読む。書いていなければ 1.0）|
 //+------------------------------------------------------------------+
@@ -416,7 +446,7 @@ bool CSymbolTrader::Init(const string sym)
          return(false);
         }
       modules.SetAdaptive(InpEntryMode == ENTRY_CALENDAR ? InpAdaptWindow : 0, InpAdaptMinTrades, InpAdaptMinPF);
-      modules.SetLead(InpLeadSec);
+      modules.SetLead(InpLeadSec > 0 ? InpLeadSec : 0);
       //--- 時間帯の基準（確認用）：この時刻をニューヨーク 17:00 として扱う
       const int tod = modules.OpenTOD();
       if(tod >= 0)
@@ -444,7 +474,7 @@ bool CSymbolTrader::WeekendCloseTime(void)
 bool CSymbolTrader::IsNewBar(void)
   {
    //--- 先回りの秒数があるときは、次の足の始まりのその秒数前に「新しい足」とみなす
-   const datetime t = (InpEntryMode == ENTRY_CALENDAR && InpLeadSec > 0) ? modules.BarTime() : iTime(symbol, InpTimeframe, 0);
+   const datetime t = (InpEntryMode == ENTRY_CALENDAR && InpLeadSec != 0) ? modules.BarTime() : iTime(symbol, InpTimeframe, 0);
    if(t == 0 || t == lastBar)
       return(false);
    lastBar = t;
@@ -822,8 +852,12 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
       //--- 1回の注文の上限を超える分は、残りを分けて注文する（最初の1本が通ったら成功とみなす）
       const double maxLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
       const double first  = (maxLot > 0.0 && lots > maxLot) ? maxLot : lots;
+      const datetime sentAt = TimeCurrent();
+      const ulong    sentUs = GetMicrosecondCount();
       const bool sent = isBuy ? g_trade.Buy(first, symbol, entry, sl, tp, comment)
                               : g_trade.Sell(first, symbol, entry, sl, tp, comment);
+      //--- 注文の遅れを記録する（テスターでは時刻の差、実運用では実際にかかった時間）
+      RecordLatency(MQLInfoInteger(MQL_TESTER) ? (double)(TimeCurrent() - sentAt) : (double)(GetMicrosecondCount() - sentUs) / 1e6);
       const uint rc = g_trade.ResultRetcode();
       if(sent && (rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_PLACED || rc == TRADE_RETCODE_DONE_PARTIAL))
         {
@@ -879,7 +913,19 @@ bool CSymbolTrader::Open(const ENUM_ORDER_TYPE type, const ENUM_AMS_REGIME reg,
 // グローバル
 //==================================================================
 CSymbolTrader *g_traders[];
+
+//+------------------------------------------------------------------+
+//| 自動で決めた先回りの秒数を、全銘柄に反映する                            |
+//+------------------------------------------------------------------+
+void ApplyAutoLead(void)
+  {
+   for(int i = 0; i < ArraySize(g_traders); i++)
+      g_traders[i].modules.SetLead(g_autoLead);
+  }
 bool           g_anyClosing  = false;     // どれかの銘柄が決済の途中か
+double         g_lat[];                   // 最近の注文の遅れ（秒）。先回りの秒数の自動調整に使う
+int            g_latN        = 0;
+int            g_autoLead    = 0;         // 自動で決めた先回りの秒数
 int            g_minPendPrio = 1000000;   // 保留中のシグナルのうち、最も高い優先順位（時刻ルール）
 
 //+------------------------------------------------------------------+
