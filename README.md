@@ -92,6 +92,18 @@
 - 1か月で -13% 前後、最高値から 20〜30% の下落が起こりえます。強制ロスカットはどの期間でも0回でしたが、損切りが大きく滑ると余裕は小さくなります。
 - 実際に使う前に、OANDA デモ口座で数か月動かし、成績を確かめてください。
 
+## デモ口座での実運用（フォワードテスト）
+
+GitHub Actions の `MT5 Live (OANDA demo)`（`.github/workflows/mt5-live.yml`）で、OANDA デモ口座に推奨設定（`AMS_Calendar_Portfolio.set`）の EA を動かしています。
+
+- 約5.5時間ずつ動かし、終わる前に次の回を起動して、途切れずにつなぎます。
+  - 東京の朝（日本時間 9:00〜12:10）と C4 の時間（日本時間 21:35〜24:10）には、入れ替わりの切れ目が来ないようにしています。
+- 成績は `reports/live/summary.md`（月ごとの損益・ルールごとの成績・残高）に、毎回自動でまとめます。
+  - 取引の記録は `reports/live/AMS_live_deals.csv`、残高の推移は `reports/live/AMS_live_account.csv` です。
+  - 口座番号やパスワードは、公開されるファイルに書き出しません。
+- 止めるには：リポジトリの Settings → Secrets and variables → Actions → Variables に `LIVE_ENABLED` = `false` を作ります。実行中の回は、Actions の画面で Cancel します。
+- EA を再起動しても、自動調整の記録・月初の残高・保有中のポジションの決済時刻は引き継ぎます。
+
 ---
 
 ## 仕組み
