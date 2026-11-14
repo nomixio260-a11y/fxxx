@@ -675,6 +675,7 @@ double CModuleSet::TokyoFix(void)
 #define RULE_MONTHEND   2
 #define RULE_MONTHSTART 3
 #define RULE_DOW_BASE   10   // 10 + 曜日（1 = 月 〜 5 = 金）
+#define RULE_DOW_NG_BASE 20  // 20 + 曜日：その曜日で、ゴトー日ではない日（"FRI-NG" など）
 
 int CModuleSet::SetRules(const string rules)
   {
@@ -726,8 +727,12 @@ int CModuleSet::SetRules(const string rules)
       if(f[5] == "MONTHSTART") filter = RULE_MONTHSTART;
       const string dows[5] = {"MON", "TUE", "WED", "THU", "FRI"};
       for(int k = 0; k < 5; k++)
+        {
          if(f[5] == dows[k])
             filter = RULE_DOW_BASE + k + 1;
+         if(f[5] == dows[k] + "-NG")
+            filter = RULE_DOW_NG_BASE + k + 1;
+        }
       const bool gapRule = (f[4] == "GAP");
       const int dir = (f[4] == "BUY") ? 1 : ((f[4] == "SELL") ? -1 : (gapRule ? 1 : 0));
       if(clock < 0 || filter < 0 || dir == 0)
@@ -868,6 +873,8 @@ bool CModuleSet::RuleDayOK(const int filter, const datetime local, const int clo
       return(true);
    if(filter == RULE_GOTOBI)
       return(IsGotobi(clock == 0 ? local : local));   // ゴトー日は東京の時計のルールで使う
+   if(filter >= RULE_DOW_NG_BASE)
+      return(dt.day_of_week == filter - RULE_DOW_NG_BASE && !IsGotobi(local));
    if(filter >= RULE_DOW_BASE)
       return(dt.day_of_week == filter - RULE_DOW_BASE);
    //--- 月末＝その月の最終平日、月初＝最初の2平日
