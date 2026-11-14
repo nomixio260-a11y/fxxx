@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data as D  # noqa: E402
 import seasonality as S  # noqa: E402
 
-PAIRS = ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "EURUSD", "GBPUSD"]
+PAIRS = [p.strip() for p in os.environ.get("AMS_PAIRS", "USDJPY,EURJPY,GBPJPY,AUDJPY,EURUSD,GBPUSD").split(",")]
 PERIODS = (("2015〜21/10", ("2015-01-01", "2021-11-01")), ("前半", ("2021-11-01", "2024-11-01")),
            ("後半", ("2024-11-01", "2026-11-14")))
 
@@ -72,7 +72,7 @@ def main():
            "| ペア | 日 | 東京時間 | 保有 | 向き | " + " | ".join(n for n, _ in PERIODS) + " | プラスの年 |", "|---|---|---|---|---|---|---|---|---|"]
     out += [f"| {r[0]} | {'月初' if r[1] == 'monthstart' else '月末'} | {r[2]} | {r[3]}分 | {r[4]} | " + " | ".join(r[5]) + f" | {r[6]}/{r[7]} |" for r in rows]
     text = "\n".join(out) + "\n"
-    open(os.path.join(D.ROOT, "reports", "research", "month_flow_scan.md"), "w", encoding="utf-8").write(text)
+    open(os.path.join(D.ROOT, "reports", "research", "month_flow_scan" + os.environ.get("AMS_TAG", "") + ".md"), "w", encoding="utf-8").write(text)
     print(text)
 
 
