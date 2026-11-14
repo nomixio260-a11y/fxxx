@@ -1,0 +1,2 @@
+run=406 mode=backtest period=M5 model=4 exec=default from=2021.11.01 to=2026.11.13 symbols=default deposit=300000 preset=AMS_Calendar_Portfolio.set inputs=InpLeadSec=-1
+RESULT なし（テスト失敗）
