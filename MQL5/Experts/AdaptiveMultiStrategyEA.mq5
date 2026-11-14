@@ -187,6 +187,84 @@ double MonthToDatePct(void)
      }
    return(g_monthStartBal > 0.0 ? (AccountInfoDouble(ACCOUNT_EQUITY) / g_monthStartBal - 1.0) * 100.0 : 0.0);
   }
+
+//+------------------------------------------------------------------+
+//| 実運用：状態（最高値・停止・月初の残高）をファイルに保存／読み込み。       |
+//| ターミナルを入れ直した環境（GitHub Actions など）でも引き継ぐため、       |
+//| 共通フォルダに置く                                                    |
+//+------------------------------------------------------------------+
+string StateFile(void) { return(StringFormat("AMS_state_%I64d.csv", AccountInfoInteger(ACCOUNT_LOGIN))); }
+
+void SaveState(void)
+  {
+   const int fh = FileOpen(StateFile(), FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fh == INVALID_HANDLE)
+      return;
+   FileWrite(fh, DoubleToString(g_peakEquity, 2), g_halted ? 1 : 0, g_monthKey, DoubleToString(g_monthStartBal, 2));
+   FileClose(fh);
+  }
+
+void LoadState(void)
+  {
+   const int fh = FileOpen(StateFile(), FILE_READ | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fh == INVALID_HANDLE)
+      return;
+   const double peak  = StringToDouble(FileReadString(fh));
+   const int    halt  = (int)StringToInteger(FileReadString(fh));
+   const int    mkey  = (int)StringToInteger(FileReadString(fh));
+   const double mbal  = StringToDouble(FileReadString(fh));
+   FileClose(fh);
+   g_peakEquity = MathMax(g_peakEquity, peak);
+   if(halt > 0)
+      g_halted = true;
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   if(mkey == dt.year * 100 + dt.mon && mbal > 0.0)
+     {
+      g_monthKey      = mkey;
+      g_monthStartBal = mbal;
+     }
+   PrintFormat("[AMS] 状態を読み込みました：最高値 %.0f、停止 %s、月初の残高 %.0f（%d）", g_peakEquity, g_halted ? "あり" : "なし",
+               g_monthStartBal, g_monthKey);
+  }
+
+//+------------------------------------------------------------------+
+//| 実運用：取引の記録と口座の状態を CSV に書き出す（成績の確認用）          |
+//+------------------------------------------------------------------+
+void ExportLive(void)
+  {
+   if(!HistorySelect(TimeCurrent() - 400 * 86400, TimeCurrent() + 86400))
+      return;
+   const int fh = FileOpen("AMS_live_deals.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fh != INVALID_HANDLE)
+     {
+      FileWrite(fh, "time", "symbol", "entry", "type", "volume", "price", "profit", "comment", "position");
+      const int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+        {
+         const ulong d = HistoryDealGetTicket(i);
+         if(d == 0 || (ulong)HistoryDealGetInteger(d, DEAL_MAGIC) != InpMagic)
+            continue;
+         const double pl = HistoryDealGetDouble(d, DEAL_PROFIT) + HistoryDealGetDouble(d, DEAL_SWAP) + HistoryDealGetDouble(d, DEAL_COMMISSION);
+         FileWrite(fh, TimeToString((datetime)HistoryDealGetInteger(d, DEAL_TIME), TIME_DATE | TIME_SECONDS),
+                   HistoryDealGetString(d, DEAL_SYMBOL), (int)HistoryDealGetInteger(d, DEAL_ENTRY),
+                   (int)HistoryDealGetInteger(d, DEAL_TYPE), DoubleToString(HistoryDealGetDouble(d, DEAL_VOLUME), 2),
+                   DoubleToString(HistoryDealGetDouble(d, DEAL_PRICE), 5), DoubleToString(pl, 0),
+                   HistoryDealGetString(d, DEAL_COMMENT), (long)HistoryDealGetInteger(d, DEAL_POSITION_ID));
+        }
+      FileClose(fh);
+     }
+   //--- 口座の状態は追記していく（残高の推移を見るため）
+   const int fa = FileOpen("AMS_live_account.csv", FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fa != INVALID_HANDLE)
+     {
+      FileSeek(fa, 0, SEEK_END);
+      FileWrite(fa, TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS), DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 0),
+                DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 0), DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_LEVEL), 0),
+                PositionsTotal());
+      FileClose(fa);
+     }
+  }
 bool   g_stopOut    = false;   // バックテスト中に強制ロスカットがあったか
 bool   g_halted     = false;
 int    g_sigTotal   = 0;       // 注文を試みる対象になったシグナルの数
@@ -875,6 +953,7 @@ int OnInit(void)
          Print("[AMS] 注意：前回、ドローダウン上限で停止しています。再開するには、MT5 の「ツール → グローバル変数」で ",
                GVName("halted"), " を削除してください");
         }
+      LoadState();
       if(InpUseTimer)
          EventSetTimer(2);
      }
@@ -891,6 +970,11 @@ int OnInit(void)
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      SaveState();
+      ExportLive();
+     }
    for(int i = 0; i < ArraySize(g_traders); i++)
      {
       if(CheckPointer(g_traders[i]) == POINTER_DYNAMIC)
@@ -971,6 +1055,19 @@ void OnTick(void)
 void OnTimer(void)
   {
    ProcessAll();
+   //--- 実運用：1分ごとに状態を保存し、1時間ごとに取引の記録を書き出す
+   static datetime lastSave = 0, lastExport = 0;
+   const datetime now = TimeCurrent();
+   if(now - lastSave >= 60)
+     {
+      lastSave = now;
+      SaveState();
+     }
+   if(now - lastExport >= 3600)
+     {
+      lastExport = now;
+      ExportLive();
+     }
   }
 
 //==================================================================

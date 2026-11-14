@@ -1,0 +1,108 @@
+name: MT5 Live (OANDA demo)
+
+# OANDA デモ口座で EA を実際に動かす（フォワードテスト）。
+# - 1回あたり最大約5.5時間動かし、終わる前に次の回を起動して、途切れずにつなぐ。
+#   （スケジュール起動は既定のブランチでしか動かないため、この方式にしている）
+# - 前の回が終わるまで、次の回は待つ（同じ口座で2つの MT5 が同時に注文しないように）。
+# - 止めるには：リポジトリの変数（Settings → Secrets and variables → Actions → Variables）に
+#   LIVE_ENABLED=false を作る。実行中の回は Actions の画面から Cancel できる。
+# - 状態（自動調整の記録・月初の残高など）は、キャッシュで次の回に引き継ぐ。
+# - 成績は reports/live/summary.md にまとめて、このブランチにコミットする。
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "この回で動かす最大の分数（既定 330）"
+        required: false
+        default: "330"
+      preset:
+        description: "使うプリセット（MQL5/Presets のファイル名）"
+        required: false
+        default: "AMS_Calendar_Portfolio.set"
+      chain:
+        description: "終わる前に次の回を起動して続けるか（true / false）"
+        required: false
+        default: "true"
+
+concurrency:
+  group: mt5-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: windows-latest
+    timeout-minutes: 380
+    permissions:
+      contents: write   # 成績を reports/live にコミットするため
+      actions: write    # 次の回を起動するため
+    env:
+      MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
+      MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
+      MT5_SERVER: ${{ secrets.MT5_SERVER }}
+      MT5_INSTALLER_URL: ${{ vars.MT5_INSTALLER_URL || 'https://download.mql5.com/cdn/web/oanda.corporation/mt5/oanda5setup.exe' }}
+      LIVE_MINUTES: ${{ inputs.minutes || '330' }}
+      LIVE_PRESET: ${{ inputs.preset || 'AMS_Calendar_Portfolio.set' }}
+      LIVE_ENABLED: ${{ vars.LIVE_ENABLED || 'true' }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Stop if disabled
+        if: env.LIVE_ENABLED == 'false'
+        run: echo "LIVE_ENABLED=false のため、実運用は止まっています。" && exit 1
+        shell: bash
+
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5
+        shell: pwsh
+        run: ./tools/ci/install_mt5.ps1
+
+      - name: Compile EA (0 errors / 0 warnings)
+        shell: pwsh
+        run: ./tools/ci/compile.ps1
+
+      - name: Restore EA state
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/AppData/Roaming/MetaQuotes/Terminal/Common/Files
+          key: mt5-live-state-${{ github.run_id }}
+          restore-keys: mt5-live-state-
+
+      - name: Run EA on the demo account
+        shell: pwsh
+        run: ./tools/ci/live.ps1
+
+      - name: Save EA state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/AppData/Roaming/MetaQuotes/Terminal/Common/Files
+          key: mt5-live-state-${{ github.run_id }}
+
+      - name: Start the next run
+        if: ${{ !cancelled() && (inputs.chain || 'true') == 'true' && env.LIVE_ENABLED != 'false' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run mt5-live.yml --ref "$GITHUB_REF_NAME" \
+            -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を起動しました"
+
+      - name: Save results to repository
+        if: always()
+        shell: bash
+        run: |
+          python tools/live_summary.py reports/live || true
+          tmp="$RUNNER_TEMP/live"; rm -rf "$tmp"; cp -r reports/live "$tmp" 2>/dev/null || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5 6 7 8; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard FETCH_HEAD
+            mkdir -p reports/live && cp -r "$tmp"/. reports/live/
+            git add reports/live
+            git diff --cached --quiet && { echo "変更なし"; exit 0; }
+            git commit -q -m "live: results ${GITHUB_RUN_NUMBER} [skip ci]"
+            if git push -q origin HEAD:"$GITHUB_REF_NAME"; then echo "saved"; exit 0; fi
+            sleep $((i * 5))
+          done
