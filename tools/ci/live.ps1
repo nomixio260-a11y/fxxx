@@ -16,10 +16,10 @@ New-Item -ItemType Directory -Force -Path "$dir\MQL5\Presets", $common, $outDir 
 Copy-Item "$repo\MQL5\Presets\*.set" "$dir\MQL5\Presets\" -Force
 
 # 取引の時間帯に入れ替わりの切れ目が来ないように、終わる時刻を決める（UTC）。
-#   東京の朝（日本時間 9:00〜12:10 = UTC 0:00〜3:10）と、A1・C4（ロンドン 11:00〜13:00 と日本時間 22:00〜24:00 = UTC 10:00〜15:10）
+#   東京の朝（日本時間 9:00〜12:10 = UTC 0:00〜3:10）と、C7・A1・C4（日本時間 17:00〜19:00、ロンドン 11:00〜13:00、日本時間 22:00〜24:00 = UTC 8:00〜15:10）
 $start = (Get-Date).ToUniversalTime()
 $end   = $start.AddMinutes($runMin)
-$windows = @(@(0, 0, 3, 10), @(10, 0, 15, 10))
+$windows = @(@(0, 0, 3, 10), @(8, 0, 15, 10))
 function In-Window([datetime]$t) {
   foreach ($w in $windows) {
     $ws = $t.Date.AddHours($w[0]).AddMinutes($w[1]); $we = $t.Date.AddHours($w[2]).AddMinutes($w[3])
