@@ -1,0 +1,2 @@
+run=342 mode=backtest period=M5 model=1 exec=default from=2015.01.01 to=2021.10.31 symbols=default deposit=3000000 preset=AMS_Calendar_Portfolio.set inputs=default
+RESULT net=0 | pf=0.00 | trades=0 | win=0(0.00%) | dd=0%(0)
