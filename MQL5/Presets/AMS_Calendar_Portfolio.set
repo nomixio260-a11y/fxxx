@@ -33,3 +33,5 @@ InpDDRiskCutPct=15.0
 InpDDRiskMul=0.5
 InpSplitOrders=true
 InpMaxLotsPerSymbol=30.0
+InpAsyncOrders=true
+InpLeadSec=-1
