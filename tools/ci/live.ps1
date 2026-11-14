@@ -66,6 +66,8 @@ function Show-NewLines([string]$pattern, [string]$tag) {
     $lines = @(Get-Content $_.FullName -Encoding Unicode -ErrorAction SilentlyContinue)
     $s = if ($script:shown.ContainsKey($_.FullName)) { $script:shown[$_.FullName] } else { 0 }
     for ($i = $s; $i -lt $lines.Count; $i++) {
+      # ログイン成功の確認は、口座番号を隠す前に行う
+      if ($lines[$i] -match 'authorized on') { $script:authorized = $true }
       # 口座番号を含む行は表示しない（ログは公開されるため）
       if ($env:MT5_LOGIN -and $lines[$i].Contains($env:MT5_LOGIN)) { continue }
       Write-Host "[$tag] $($lines[$i])"; $found += $lines[$i]
@@ -80,17 +82,16 @@ try {
   $p = Start-Process -FilePath (Join-Path $dir 'terminal64.exe') -ArgumentList '/portable', "/config:`"$conf`"" -PassThru
   Start-Sleep -Seconds 90
   Remove-Item $conf -ErrorAction SilentlyContinue   # パスワードを含むので、起動したらすぐ消す
-  $authorized = $false
+  $script:authorized = $false
   while ((Get-Date).ToUniversalTime() -lt $end) {
     if ($p.HasExited) { Write-Host 'ターミナルが終了しました'; break }
     $new = @(Show-NewLines "$dir\logs\*.log" 'terminal')
     $ea  = @(Show-NewLines "$dir\MQL5\Logs\*.log" 'ea')
     $eaLines += $ea | Where-Object { $_ -match '\[AMS\]' }
-    if ($new | Where-Object { $_ -match 'authorized on' }) { $authorized = $true }
     if ($new | Where-Object { $_ -match 'authorization on .* failed' }) { Write-Host 'NG: ログインに失敗しました'; break }
     Start-Sleep -Seconds 60
   }
-  if (-not $authorized) { Write-Host '注意：ログインの成功をログで確認できませんでした' }
+  if ($script:authorized) { Write-Host 'ログインできました' } else { Write-Host '注意：ログインの成功をログで確認できませんでした' }
 } finally {
   Remove-Item $conf -ErrorAction SilentlyContinue
   # 正しい手順で終了させ、EA の OnDeinit（状態の保存・記録の書き出し）を動かす
