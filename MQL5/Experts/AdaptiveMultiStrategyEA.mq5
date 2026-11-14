@@ -139,6 +139,8 @@ input double           InpTrailStepPips     = 1.0;         // SLを動かす最�
 input double           InpMaxDailyLossPct   = 15.0;        // 1日の損失上限（%、0で無効）
 input double           InpDDRiskCutPct      = 0.0;         // 最高値からの下落がこの%を超えているあいだは、リスクを下の倍率にする（0で無効）
 input double           InpDDRiskMul         = 0.5;         // 上の条件のときのリスクの倍率
+input double           InpMonthTargetPct    = 0.0;         // [月間目標] その月の利益（月初の残高比）がこの%に届いたら、月末までリスクを下げる（0で無効）
+input double           InpMonthLockMul      = 0.0;         // [月間目標] 届いた後のリスクの倍率（0 = その月は新規エントリーをしない）
 input double           InpMaxDDStopPct      = 50.0;        // 最高値からの下落がこの%を超えたら全決済して停止（0で無効）
 input double           InpMaxMarginUsePct   = 40.0;        // 必要証拠金の合計の上限（有効証拠金の%。強制ロスカット防止）
 input double           InpMinLevelAfterSL   = 150.0;       // すべての建玉が損切りに達しても残す証拠金維持率（%。OANDA のロスカットは100%）
@@ -166,6 +168,25 @@ input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）が
 CTrade g_trade;
 double g_weights[4][AMS_STRATEGY_COUNT];   // [REGIME][STRATEGY]
 double g_peakEquity = 0.0;
+double g_monthStartBal = 0.0;   // 月初の残高（月間目標の判定用）
+int    g_monthKey      = 0;     // いまの月（YYYYMM、サーバー時間）
+int    g_sigLock       = 0;     // 月間目標に届いたため見送ったシグナルの数
+
+//+------------------------------------------------------------------+
+//| その月の損益率（%、月初の残高比。含み損益も含める）                     |
+//+------------------------------------------------------------------+
+double MonthToDatePct(void)
+  {
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   const int key = dt.year * 100 + dt.mon;
+   if(key != g_monthKey || g_monthStartBal <= 0.0)
+     {
+      g_monthKey      = key;
+      g_monthStartBal = AccountInfoDouble(ACCOUNT_BALANCE);
+     }
+   return(g_monthStartBal > 0.0 ? (AccountInfoDouble(ACCOUNT_EQUITY) / g_monthStartBal - 1.0) * 100.0 : 0.0);
+  }
 bool   g_stopOut    = false;   // バックテスト中に強制ロスカットがあったか
 bool   g_halted     = false;
 int    g_sigTotal   = 0;       // 注文を試みる対象になったシグナルの数
@@ -550,6 +571,16 @@ void CSymbolTrader::TryEnter(void)
    if(InpDDRiskCutPct > 0.0 && g_peakEquity > 0.0 &&
       AccountInfoDouble(ACCOUNT_EQUITY) < g_peakEquity * (1.0 - InpDDRiskCutPct / 100.0))
       mul *= InpDDRiskMul;
+   //--- 月間目標：その月の利益が目標に届いたら、月末までリスクを下げる（または新規をやめる）。利益を守るため
+   if(InpMonthTargetPct > 0.0 && MonthToDatePct() >= InpMonthTargetPct)
+     {
+      if(InpMonthLockMul <= 0.0)
+        {
+         g_sigLock++;
+         return;
+        }
+      mul *= InpMonthLockMul;
+     }
    if(Open(dir > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, pendReg, pendTag, mul))
      {
       if(InpEntryMode != ENTRY_WEIGHTED)
@@ -884,6 +915,8 @@ string GVName(const string key)
 //+------------------------------------------------------------------+
 void ProcessAll(void)
   {
+   if(InpMonthTargetPct > 0.0)
+      MonthToDatePct();   // 月が変わった最初のティックで、月初の残高を記録する
    //--- 口座全体のドローダウンによる停止
    const double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    if(equity > g_peakEquity)
@@ -1070,6 +1103,8 @@ void ReportBreakdown(void)
      }
    if(fh != INVALID_HANDLE)
       FileWrite(fh, "signal", "skip_adapt", adaptSkips, 0, "", "0");
+   if(fh != INVALID_HANDLE)
+      FileWrite(fh, "signal", "skip_monthlock", g_sigLock, 0, "", "0");
    Print("[AMS] ===== 銘柄別・相場状況別・ロジック別の成績 =====");
    WriteStats(fh, "symbol", sN, sT, sW, sP);
    WriteStats(fh, "regime", rN, rT, rW, rP);
