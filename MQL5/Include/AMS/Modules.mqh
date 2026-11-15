@@ -98,7 +98,7 @@ private:
    int               m_rulePartMin[];  // 部分決済：入ってからこの分数で一部を決済（0 = しない。"PART20:0.5"）
    double            m_rulePartFrac[]; // 部分決済で決済する割合
    bool              m_partDone;       // 今の建玉で部分決済を済ませたか
-   int               m_ruleLadN[];     // はしご決済の段の数（0 = しない。"LAD:20/35/65/95" = 4段＋最後の決済で5等分）
+   int               m_ruleLadN[];     // はしご決済の段の数（0 = しない。"LAD:20-35-65-95" = 4段＋最後の決済で5等分）
    int               m_ruleLadMin[];   // はしご決済の各段の分数（ルール k の j 段目 = k * LAD_MAX + j）
    int               m_ladStage;       // 今の建玉で済ませた段の数
    bool              m_ruleGap[];     // 向きを「週明けの窓と同じ向き」にする（向きの欄が "GAP"）
@@ -833,9 +833,9 @@ int CModuleSet::SetRules(const string rules)
          else
             if(StringFind(opt, "LAD") == 0 && c > 0)
               {
-               //--- はしご決済 "LAD:20/35/65/95"：各分数で、残りを等分して少しずつ決済する（最後は保有時間の終わり）
+               //--- はしご決済 "LAD:20-35-65-95"：各分数で、残りを等分して少しずつ決済する（最後は保有時間の終わり）
                string mins[];
-               const int nm = StringSplit(StringSubstr(opt, c + 1), '/', mins);
+               const int nm = StringSplit(StringSubstr(opt, c + 1), '-', mins);
                for(int j = 0; j < nm && m_ruleLadN[k] < LAD_MAX; j++)
                  {
                   const int v = (int)StringToInteger(mins[j]);
