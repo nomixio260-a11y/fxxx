@@ -8,7 +8,8 @@
 3. 今のシステムとの月ごとの相関
 
 - シグナルは、足が確定した時点の値だけで決める（未来の情報は使わない）。次の足の始値で入り、H 本後の足の始値で出る。
-- 日付の変わり目（NY 16〜18時）にかかる取引と、週末をまたぐ取引は除く（スプレッドの見かけの値動きを避けるため）。
+- 入る時刻・出る時刻が日付の変わり目（NY 16〜18時）に当たる取引と、週末をまたぐ取引は除く（スプレッドの見かけの値動きを避けるため）。
+  日をまたぐ取引は、スワップ（政策金利の差 + 業者の上乗せ年1%、multiday_scan.py と同じ見積もり。水曜は3日分）を引く。
 - 月ごとの損益は、各取引を「その戦略の1取引のばらつき」で割ってリスクをそろえ、全ペアで平均した値。
 
 使い方: python3 tools/research/generic_panel.py → reports/research/generic_panel.md
@@ -22,6 +23,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data as D  # noqa: E402
+import multiday_scan as M  # noqa: E402（スワップの見積もり）
 import seasonality as S  # noqa: E402
 
 PAIRS = ["USDJPY", "EURJPY", "GBPJPY", "EURUSD", "AUDJPY", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF", "EURGBP",
@@ -89,13 +91,17 @@ def trades(pair):
             continue
         a, b = i + 1, i + 1 + H
         ok = (idx.values[b] - idx.values[a]) == np.timedelta64(H, "h")  # 週末・欠けをまたがない
-        bad = np.zeros(len(i), bool)
-        for s_ in range(H + 1):
-            hh = ny_h[np.minimum(a + s_, len(df) - 1)]
-            bad |= (hh >= 16) & (hh <= 18)
-        ok &= ~bad
-        r = sig[i[ok]] * (o[b[ok]] - o[a[ok]]) / pip - cost
-        res[name] = pd.Series(r, index=idx[a[ok]])
+        ha, hb = ny_h[a], ny_h[b]
+        ok &= ~((ha >= 16) & (ha <= 18)) & ~((hb >= 16) & (hb <= 18))
+        # またぐ日付の変わり目（NY 17時の足）の数。水曜は3日分
+        is17 = (ny_h == 17).astype(int)
+        wed17 = ((ny_h == 17) & (pd.DatetimeIndex(df["ny_date"]).dayofweek.values == 2)).astype(int)
+        c17, cw = np.r_[0, np.cumsum(is17)], np.r_[0, np.cumsum(wed17)]
+        nights = (c17[b] - c17[a]) + 2 * (cw[b] - cw[a])
+        a, b, sg, nights = a[ok], b[ok], sig[i[ok]], nights[ok]
+        sw = M.swap_pips(pair, idx[a].year.values, o[a], nights, sg)
+        r = sg * (o[b] - o[a]) / pip - cost - sw
+        res[name] = pd.Series(r, index=idx[a])
     return res
 
 
