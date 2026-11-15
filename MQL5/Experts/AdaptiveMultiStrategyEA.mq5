@@ -167,7 +167,7 @@ input group "=== 実運用向け ==="
 input int              InpOrderRetries      = 3;           // 注文が一時的なエラーで失敗したときの再試行回数
 input bool             InpUseTimer          = true;        // 実運用時、タイマーでも全銘柄を処理する（チャート銘柄のティックが止まっても動く）
 input bool             InpListSymbols       = false;       // 起動時に、業者が扱うすべての銘柄名をログに出して終了する（調査用）
-input string           InpExportBars        = "";          // 調査用：この銘柄（カンマ区切り）の足を AMS_bars_<銘柄>.csv に書き出して終了する（バックテストで使う）
+input string           InpExportBars        = "";          // 調査用：取引せず、テストの終わりにこの銘柄（カンマ区切り）の足を AMS_bars_<銘柄>.csv に書き出す
 input int              InpExportBarsMin     = 30;          // 書き出す足の長さ（分：1/5/15/30/60）
 input string           InpExportBarsFrom    = "2015.01.01"; // 書き出しの開始日
 
@@ -1291,14 +1291,23 @@ void ExportBarsAll(void)
 
 void OnTick(void)
   {
+   //--- 書き出しの調査では取引しない（テストの終わり＝OnTester で、全期間の足を書き出す）
    if(StringLen(InpExportBars) > 0)
      {
-      static bool done = false;
-      if(!done)
+      static datetime lastTouch = 0;
+      //--- 週に1回、対象の銘柄の足に触れて、テスターに履歴を読み込ませておく
+      if(TimeCurrent() - lastTouch >= 7 * 86400)
         {
-         done = true;
-         ExportBarsAll();
-         ExpertRemove();
+         lastTouch = TimeCurrent();
+         string syms[];
+         const int n = StringSplit(InpExportBars, ',', syms);
+         for(int i = 0; i < n; i++)
+           {
+            StringTrimLeft(syms[i]);
+            StringTrimRight(syms[i]);
+            if(StringLen(syms[i]) > 0 && SymbolSelect(syms[i], true))
+               iClose(syms[i], PERIOD_M30, 0);
+           }
         }
       return;
      }
@@ -1596,6 +1605,8 @@ double MonthlyReturns(const bool output)
 double OnTester(void)
   {
    const bool output = !MQLInfoInteger(MQL_OPTIMIZATION);
+   if(output && StringLen(InpExportBars) > 0)
+      ExportBarsAll();
    if(output)
       ReportBreakdown();
    if(output && InpExportDeals)
