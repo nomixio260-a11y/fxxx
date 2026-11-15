@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import data as D  # noqa: E402
 import seasonality as S  # noqa: E402
 
-HOLDS = [30, 60, 120]          # 分
+HOLDS = [int(x) for x in os.environ.get("AMS_HOLDS", "30,60,120").split(",")]  # 分
+SLOT = int(os.environ.get("AMS_SLOT_MIN", "30"))  # 入る時刻の刻み（分）。5 にすると 9:55 のような半端な時刻も調べる
 CLOCKS = ["tky", "ldn", "ny"]
 DES_T = float(os.environ.get("AMS_DES_T", "4.0"))
 
@@ -79,11 +80,12 @@ def scan_pair(pair):
     for clock in CLOCKS:
         hh = df[f"{clock}_h"].values
         mm = df[f"{clock}_m"].values
-        slot = np.where((mm == 0) | (mm == 30), hh * 2 + mm // 30, -1)
+        nsl = 1440 // SLOT
+        slot = np.where(mm % SLOT == 0, (hh * 60 + mm) // SLOT, -1)
         filters = S.day_filters(df, clock)
-        slot_idx = {sl: np.where(slot == sl)[0] for sl in range(48)}
+        slot_idx = {sl: np.where(slot == sl)[0] for sl in range(nsl)}
         for fname, fm in filters.items():
-            for sl in range(48):
+            for sl in range(nsl):
                 ii = slot_idx[sl]
                 ii = ii[fm[ii]]
                 des_i, val_i, fin_i = ii[m_des[ii]], ii[m_val[ii]], ii[m_fin[ii]]
@@ -100,7 +102,7 @@ def scan_pair(pair):
                     v = sign * r[val_i] - cost
                     vn, vraw, _ = stats_vec(r[val_i])
                     vt = stats_vec(v)[2]
-                    rows.append({"pair": pair, "clock": clock, "time": f"{sl // 2:02d}:{(sl % 2) * 30:02d}",
+                    rows.append({"pair": pair, "clock": clock, "time": f"{sl * SLOT // 60:02d}:{sl * SLOT % 60:02d}",
                                  "hold": hold, "filter": fname, "dir": "買い" if sign > 0 else "売り",
                                  "des_n": n, "des_mean": abs(mean), "des_t": abs(t), "des_pf": pf(d),
                                  "val_n": vn, "val_mean": sign * vraw if vn else 0.0, "val_t": vt,
