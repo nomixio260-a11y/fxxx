@@ -166,6 +166,7 @@ input int              InpSessionEdgeMin    = 15;          // 取引開始直後
 input group "=== 実運用向け ==="
 input int              InpOrderRetries      = 3;           // 注文が一時的なエラーで失敗したときの再試行回数
 input bool             InpUseTimer          = true;        // 実運用時、タイマーでも全銘柄を処理する（チャート銘柄のティックが止まっても動く）
+input bool             InpListSymbols       = false;       // 起動時に、業者が扱うすべての銘柄名をログに出して終了する（調査用）
 
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
@@ -1056,6 +1057,23 @@ int OnInit(void)
   {
    if(!ValidateInputs())
       return(INIT_PARAMETERS_INCORRECT);
+   if(InpListSymbols)
+     {
+      const int total = SymbolsTotal(false);
+      PrintFormat("[AMS] 業者の銘柄の数: %d", total);
+      string line = "";
+      for(int i = 0; i < total; i++)
+        {
+         const string nm = SymbolName(i, false);
+         line += nm + "(" + SymbolInfoString(nm, SYMBOL_PATH) + ") ";
+         if((i + 1) % 15 == 0 || i == total - 1)
+           {
+            Print("[AMS] 銘柄: ", line);
+            line = "";
+           }
+        }
+      return(INIT_FAILED);
+     }
 
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints((ulong)MathMax(InpSlippagePoints, 0));

@@ -28,7 +28,12 @@ VALID = ("2022-01-01", "2024-11-01")
 FINAL = ("2024-11-01", "2026-11-13")
 
 
+INDICES = ("SPXUSD", "JPXJPY", "GRXEUR", "UKXGBP")  # 株価指数（histdata の CFD）。1 pip = 指数の 1 ポイントとして扱う
+
+
 def pip_size(pair: str) -> float:
+    if pair in INDICES:
+        return 1.0
     return 0.01 if pair.endswith("JPY") else 0.0001
 
 

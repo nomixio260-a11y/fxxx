@@ -21,7 +21,9 @@ import data as D  # noqa: E402
 # 1取引あたりのコスト（pips）：OANDA の通常スプレッドの目安 + 不利な約定 0.5 pips
 COST = {"USDJPY": 0.8, "EURUSD": 0.8, "EURJPY": 1.0, "GBPJPY": 1.6, "AUDJPY": 1.2, "GBPUSD": 1.4,
         # 追加したペア（OANDA の通常スプレッドの目安＋0.5。やや高めに見積もる）
-        "NZDJPY": 2.0, "CHFJPY": 2.5, "CADJPY": 2.2, "AUDUSD": 1.3, "NZDUSD": 2.0, "USDCAD": 2.0, "USDCHF": 2.0}
+        "NZDJPY": 2.0, "CHFJPY": 2.5, "CADJPY": 2.2, "AUDUSD": 1.3, "NZDUSD": 2.0, "USDCAD": 2.0, "USDCHF": 2.0,
+        # 株価指数（単位は指数のポイント。OANDA の通常スプレッドの目安＋不利な約定。高めに見積もる）
+        "SPXUSD": 1.0, "JPXJPY": 15.0, "GRXEUR": 3.0, "UKXGBP": 2.5}
 HOLDS = [1, 2, 3, 4, 6]
 CLOCKS = ["tky", "ldn", "ny"]
 
