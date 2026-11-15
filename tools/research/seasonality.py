@@ -41,10 +41,12 @@ def day_filters(df: pd.DataFrame, clock: str) -> dict:
     by_month = wd.groupby([wd.dt.year, wd.dt.month])
     last_wd = set(by_month.max())
     first2 = set(pd.concat([g.sort_values().head(2) for _, g in by_month]))
+    dn = d.normalize().values.astype("datetime64[ns]")
+    as64 = lambda xs: np.array(sorted(xs), dtype="datetime64[ns]")  # noqa: E731（Timestamp の比較は遅いので datetime64 で比べる）
     f = {
         "all": np.ones(len(df), bool),
-        "monthend": np.isin(d.normalize(), list(last_wd)),
-        "monthstart": np.isin(d.normalize(), list(first2)),
+        "monthend": np.isin(dn, as64(last_wd)),
+        "monthstart": np.isin(dn, as64(first2)),
     }
     for k in range(5):
         f[f"dow{k}"] = dow == k
@@ -77,7 +79,7 @@ def gotobi_mask(d: pd.DatetimeIndex) -> np.ndarray:
             n += 1
         if ok:
             got.add(day)
-    return np.isin(d.normalize(), list(got))
+    return np.isin(d.normalize().values.astype("datetime64[ns]"), np.array(sorted(got), dtype="datetime64[ns]"))
 
 
 def load_jp_holidays() -> set:
