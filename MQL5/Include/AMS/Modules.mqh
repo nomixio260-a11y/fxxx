@@ -50,6 +50,8 @@ const int AMS_JP_HOLIDAYS[] =
    20280505, 20280717, 20280811, 20280918, 20280922, 20281009, 20281103, 20281123, 20281231
   };
 
+#define LAD_MAX 6   // はしご決済の段の上限
+
 class CModuleSet
   {
 private:
@@ -96,6 +98,9 @@ private:
    int               m_rulePartMin[];  // 部分決済：入ってからこの分数で一部を決済（0 = しない。"PART20:0.5"）
    double            m_rulePartFrac[]; // 部分決済で決済する割合
    bool              m_partDone;       // 今の建玉で部分決済を済ませたか
+   int               m_ruleLadN[];     // はしご決済の段の数（0 = しない。"LAD:20/35/65/95" = 4段＋最後の決済で5等分）
+   int               m_ruleLadMin[];   // はしご決済の各段の分数（ルール k の j 段目 = k * LAD_MAX + j）
+   int               m_ladStage;       // 今の建玉で済ませた段の数
    bool              m_ruleGap[];     // 向きを「週明けの窓と同じ向き」にする（向きの欄が "GAP"）
    double            m_ruleGapMin[];  // 窓の大きさ（平均値幅で割った値）がこれ以上の週だけ（"GAP:0.70"）
    string            m_ruleName[];
@@ -164,6 +169,7 @@ public:
    datetime          BarTime(void) const;
    //--- 部分決済の時刻になったら、決済する割合を返す（1回だけ）。なければ 0
    double            PartialDue(void);
+
    int               SetRules(const string rules);
    double            PendingRuleSL(void) const;
    void              SetAdaptive(const int window, const int minTrades, const double minPF);
@@ -213,6 +219,7 @@ CModuleSet::CModuleSet(void) : m_symbol(""),
                                m_adSkips(0),
                                m_activeRule(-1),
                                m_partDone(false),
+                               m_ladStage(0),
                                m_activeUntil(0)
   {
   }
@@ -328,6 +335,7 @@ void CModuleSet::MarkEntered(void)
       m_activeRule  = m_pendRule;
       m_activeUntil = BarTime() + m_ruleHold[m_pendRule] * 60;
       m_partDone    = false;
+      m_ladStage    = 0;
      }
   }
 
@@ -355,6 +363,11 @@ void CModuleSet::RestoreActive(void)
          m_activeRule  = k;
          m_activeUntil = bar + m_ruleHold[k] * 60;
          m_partDone    = (m_rulePartMin[k] > 0 && TimeCurrent() >= bar + m_rulePartMin[k] * 60);
+         //--- はしご決済：時刻を過ぎた段は済んだものとする（再起動の前に決済したはず）
+         m_ladStage = 0;
+         for(int j = 0; j < m_ruleLadN[k]; j++)
+            if(TimeCurrent() >= bar + m_ruleLadMin[k * LAD_MAX + j] * 60)
+               m_ladStage = j + 1;
          PrintFormat("[AMS] %s 再起動後の復元：ルール %s のポジション（%s に建てた）を %s に決済します", m_symbol, m_ruleName[k],
                      TimeToString(opened), TimeToString(m_activeUntil));
          return;
@@ -766,6 +779,8 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_rulePreBelow, m_ruleCount);
       ArrayResize(m_rulePartMin, m_ruleCount);
       ArrayResize(m_rulePartFrac, m_ruleCount);
+      ArrayResize(m_ruleLadN, m_ruleCount);
+      ArrayResize(m_ruleLadMin, m_ruleCount * LAD_MAX);
       ArrayResize(m_ruleGap, m_ruleCount);
       ArrayResize(m_ruleGapMin, m_ruleCount);
       m_ruleGap[k]    = gapRule;
@@ -804,6 +819,7 @@ int CModuleSet::SetRules(const string rules)
       m_rulePreBelow[k] = false;
       m_rulePartMin[k] = 0;
       m_rulePartFrac[k] = 0.0;
+      m_ruleLadN[k] = 0;
       //--- 8・9つ目（任意）："PRE30:-0.07"（直前の値動きの条件）、"GAP:z"（週明けの窓）、"PART20:0.5"（20分後に半分を決済）
       for(int x = 7; x < nf; x++)
         {
@@ -815,6 +831,19 @@ int CModuleSet::SetRules(const string rules)
                m_ruleGapMin[k] = StringToDouble(StringSubstr(opt, c + 1));
            }
          else
+            if(StringFind(opt, "LAD") == 0 && c > 0)
+              {
+               //--- はしご決済 "LAD:20/35/65/95"：各分数で、残りを等分して少しずつ決済する（最後は保有時間の終わり）
+               string mins[];
+               const int nm = StringSplit(StringSubstr(opt, c + 1), '/', mins);
+               for(int j = 0; j < nm && m_ruleLadN[k] < LAD_MAX; j++)
+                 {
+                  const int v = (int)StringToInteger(mins[j]);
+                  if(v > 0 && v < m_ruleHold[k])
+                     m_ruleLadMin[k * LAD_MAX + m_ruleLadN[k]++] = v;
+                 }
+              }
+            else
             if(StringFind(opt, "PART") == 0)
               {
                if(c > 4)
@@ -845,6 +874,8 @@ int CModuleSet::SetRules(const string rules)
                   m_symbol, name, f[1], m_ruleHHMM[k], m_ruleHold[k], f[4], f[5], m_ruleSL[k],
                   m_rulePreMin[k] > 0 ? StringFormat(" 直前%d分の値動き%s%.2f", m_rulePreMin[k], m_rulePreBelow[k] ? "<" : ">", m_rulePreThr[k]) : "",
                   m_rulePartMin[k] > 0 ? StringFormat(" %d分後に%.0f%%を決済", m_rulePartMin[k], m_rulePartFrac[k] * 100.0) : "");
+      if(m_ruleLadN[k] > 0)
+         PrintFormat("[AMS] %s 時刻ルール %s: はしご決済 %d段（最初 %d分後）", m_symbol, name, m_ruleLadN[k], m_ruleLadMin[k * LAD_MAX]);
      }
    return(m_ruleCount);
   }
@@ -959,9 +990,18 @@ double CModuleSet::PartialDue(void)
    if(m_mode != ENTRY_CALENDAR || m_partDone || m_activeUntil == 0 || m_activeRule < 0 || m_activeRule >= m_ruleCount)
       return(0.0);
    const int k = m_activeRule;
+   const datetime opened = m_activeUntil - m_ruleHold[k] * 60;
+   //--- はしご決済：段 j（0から）では、残りの 1/(段の数+1-j) を決済する（全体を等分）
+   if(m_ruleLadN[k] > 0)
+     {
+      if(m_ladStage >= m_ruleLadN[k] || BarTime() < opened + m_ruleLadMin[k * LAD_MAX + m_ladStage] * 60)
+         return(0.0);
+      const double frac = 1.0 / (double)(m_ruleLadN[k] + 1 - m_ladStage);
+      m_ladStage++;
+      return(frac);
+     }
    if(m_rulePartMin[k] <= 0 || m_rulePartFrac[k] <= 0.0)
       return(0.0);
-   const datetime opened = m_activeUntil - m_ruleHold[k] * 60;
    if(BarTime() < opened + m_rulePartMin[k] * 60)
       return(0.0);
    m_partDone = true;
