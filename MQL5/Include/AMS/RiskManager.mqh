@@ -27,6 +27,7 @@ private:
    double            m_minLevelAfterSL;  // すべての建玉が損切りに達しても残す証拠金維持率（%）
    bool              m_split;           // 1回の注文の上限を超えるロットを、分けて注文するか
    double            m_maxLots;         // 1回の取引の最大ロット（0 = 上限なし）
+   double            m_lastCapFrac;     // 直前の CalcLots で、最大ロットの上限のために切られた割合（0〜1。受け皿のルールが使う）
    bool              m_asyncClose;      // 複数の建玉の決済を同時に出すか
    int               m_dayKey;           // 日付（YYYYMMDD）
    double            m_dayStartEquity;
@@ -50,6 +51,7 @@ public:
    void              SetSplitOrders(const bool split) { m_split = split; }
    //--- 1回の取引（1銘柄）の最大ロット（0 = 上限なし）。残高が大きくなっても、現実的に約定できる量に抑えるため
    void              SetMaxLots(const double lots) { m_maxLots = lots; }
+   double            LastCapFrac(void) const { return(m_lastCapFrac); }
    //--- 複数の建玉を決済するとき、約定を待たずに同時に出す（遅れが積み重ならないように）
    void              SetAsyncClose(const bool async) { m_asyncClose = async; }
    double            CalcLots(const ENUM_ORDER_TYPE type, const double entry, const double sl,
@@ -77,6 +79,7 @@ CRiskManager::CRiskManager(void) : m_symbol(""),
                                    m_minLevelAfterSL(150.0),
                                    m_split(false),
                                    m_maxLots(0.0),
+                                   m_lastCapFrac(0.0),
                                    m_asyncClose(false),
                                    m_dayKey(0),
                                    m_dayStartEquity(0.0)
@@ -158,6 +161,7 @@ double CRiskManager::NormalizeVolume(const double lots) const
 double CRiskManager::CalcLots(const ENUM_ORDER_TYPE type, const double entry, const double sl,
                               const double riskMultiplier)
   {
+   m_lastCapFrac = 0.0;
    if(entry <= 0.0 || sl <= 0.0 || MathAbs(entry - sl) <= 0.0)
       return(0.0);
 
@@ -211,7 +215,10 @@ double CRiskManager::CalcLots(const ENUM_ORDER_TYPE type, const double entry, co
          lots = NormalizeVolume(xmax);
      }
    if(m_maxLots > 0.0 && lots > m_maxLots)
+     {
+      m_lastCapFrac = 1.0 - m_maxLots / lots;
       lots = NormalizeVolume(m_maxLots);
+     }
    return(lots);
   }
 

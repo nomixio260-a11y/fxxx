@@ -292,6 +292,28 @@ bool   g_halted     = false;
 int    g_sigTotal   = 0;       // 注文を試みる対象になったシグナルの数
 int    g_sigSpread  = 0;       // スプレッドが広いまま期限切れになり、見送ったシグナルの数
 int    g_sigOther   = 0;       // その他の理由（取引時間外・上限など）で見送ったシグナルの数
+//--- 受け皿のルール（"OVF:G3F"）のため：時刻ルールが最大ロットの上限で切られた割合を、ルール名と足の時刻で覚えておく
+string   g_capRule[32];
+datetime g_capBar[32];
+double   g_capFrac[32];
+int      g_capNext = 0;
+int      g_ovfTrades = 0;       // 受け皿のルールが注文した回数
+
+void RecordCap(const string rule, const datetime bar, const double frac)
+  {
+   g_capRule[g_capNext] = rule;
+   g_capBar[g_capNext]  = bar;
+   g_capFrac[g_capNext] = frac;
+   g_capNext = (g_capNext + 1) % 32;
+  }
+
+double CapFracFor(const string rule, const datetime bar)
+  {
+   for(int i = 0; i < 32; i++)
+      if(g_capRule[i] == rule && g_capBar[i] == bar)
+         return(g_capFrac[i]);
+   return(0.0);
+  }
 
 int CountAllPositions(void);
 
@@ -717,8 +739,11 @@ void CSymbolTrader::TryEnter(void)
    const double spread = SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID);
    if(InpEntryMode == ENTRY_TOKYO_FIX || InpEntryMode == ENTRY_CALENDAR)
      {
-      //--- 短い時間足の ATR は小さすぎて基準にならないので、pips で上限を決める
-      if(InpFixMaxSpreadPips > 0.0 && spread > InpFixMaxSpreadPips * PipSize(symbol))
+      //--- 短い時間足の ATR は小さすぎて基準にならないので、pips で上限を決める（ルールに "SPR:3" があればその値）
+      double spLim = InpFixMaxSpreadPips;
+      if(InpEntryMode == ENTRY_CALENDAR && modules.PendingRuleSpread() > 0.0)
+         spLim = modules.PendingRuleSpread();
+      if(spLim > 0.0 && spread > spLim * PipSize(symbol))
         {
          pendSpreadWait = true;
          return;
@@ -748,6 +773,20 @@ void CSymbolTrader::TryEnter(void)
    noLots  = false;
    //--- 最高値から大きく下落しているあいだは、リスクを小さくする（DD を深くしないため）
    double mul = pendMul;
+   //--- 受け皿のルール：元のルールが同じ足で最大ロットの上限に当たったときだけ、切られた割合の分を注文する
+   if(InpEntryMode == ENTRY_CALENDAR && modules.PendingRuleOvf() != "")
+     {
+      const double cf = CapFracFor(modules.PendingRuleOvf(), pendBarTime);
+      if(cf <= 0.0)
+        {
+         if(InpVerbose)
+            PrintFormat("[AMS] %s [%s] 受け皿：%s は上限に当たっていないので注文しません", symbol, pendTag, modules.PendingRuleOvf());
+         return;
+        }
+      mul *= cf;
+      g_ovfTrades++;
+      PrintFormat("[AMS] %s [%s] 受け皿：%s が上限で %.0f%% 切られた分を注文します", symbol, pendTag, modules.PendingRuleOvf(), cf * 100.0);
+     }
    if(InpDDRiskCutPct > 0.0 && g_peakEquity > 0.0 &&
       AccountInfoDouble(ACCOUNT_EQUITY) < g_peakEquity * (1.0 - InpDDRiskCutPct / 100.0))
       mul *= InpDDRiskMul;
@@ -773,6 +812,8 @@ void CSymbolTrader::TryEnter(void)
      }
    if(Open(dir > 0 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL, pendReg, pendTag, mul))
      {
+      if(InpEntryMode == ENTRY_CALENDAR)
+         RecordCap(pendTag, pendBarTime, risk.LastCapFrac());
       if(InpEntryMode != ENTRY_WEIGHTED)
          modules.MarkEntered();
      }

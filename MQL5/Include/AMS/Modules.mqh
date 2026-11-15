@@ -103,6 +103,8 @@ private:
    int               m_ladStage;       // 今の建玉で済ませた段の数
    bool              m_ruleGap[];     // 向きを「週明けの窓と同じ向き」にする（向きの欄が "GAP"）
    double            m_ruleGapMin[];  // 窓の大きさ（平均値幅で割った値）がこれ以上の週だけ（"GAP:0.70"）
+   string            m_ruleOvf[];     // 受け皿：このルールは、指定のルールが最大ロットの上限で切られた分だけ注文する（"OVF:G3F"）
+   double            m_ruleSpr[];     // このルールのスプレッドの上限（pips。0 = 共通の InpFixMaxSpreadPips。"SPR:3"）
    string            m_ruleName[];
    int               m_rulePrio[];    // 優先順位（入力に書いた順。小さいほど先に注文する）
    int               m_pendRule;      // シグナルを出したルール（エントリー待ち）
@@ -180,6 +182,8 @@ public:
    int               WeekGapDir(const double minZ) const;
    string            PendingRuleName(void) const { return(m_pendRule >= 0 ? m_ruleName[m_pendRule] : ""); }
    int               PendingRulePrio(void) const { return(m_pendRule >= 0 ? m_rulePrio[m_pendRule] : 1000000); }
+   string            PendingRuleOvf(void) const { return(m_pendRule >= 0 ? m_ruleOvf[m_pendRule] : ""); }
+   double            PendingRuleSpread(void) const { return(m_pendRule >= 0 ? m_ruleSpr[m_pendRule] : 0.0); }
    datetime          TokyoTime(const datetime serverTime) const;
    double            EntrySignal(const double meanRevSignal);
    bool              ExitSignal(const ENUM_POSITION_TYPE type);
@@ -728,7 +732,7 @@ int CModuleSet::SetRules(const string rules)
       StringReplace(item, ",", "|");
       string f[];
       const int nf = StringSplit(item, '|', f);
-      if(nf < 7 || nf > 9)
+      if(nf < 7 || nf > 12)
         {
          PrintFormat("[AMS] 時刻ルールの書式が正しくありません: %s", items[i]);
          continue;
@@ -783,8 +787,12 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_ruleLadMin, m_ruleCount * LAD_MAX);
       ArrayResize(m_ruleGap, m_ruleCount);
       ArrayResize(m_ruleGapMin, m_ruleCount);
+      ArrayResize(m_ruleOvf, m_ruleCount);
+      ArrayResize(m_ruleSpr, m_ruleCount);
       m_ruleGap[k]    = gapRule;
       m_ruleGapMin[k] = 0.0;
+      m_ruleOvf[k] = "";
+      m_ruleSpr[k] = 0.0;
       ArrayResize(m_ruleName, m_ruleCount);
       ArrayResize(m_rulePrio, m_ruleCount);
       ArrayResize(m_vOpen, m_ruleCount);
@@ -831,6 +839,12 @@ int CModuleSet::SetRules(const string rules)
                m_ruleGapMin[k] = StringToDouble(StringSubstr(opt, c + 1));
            }
          else
+            if(StringFind(opt, "OVF") == 0 && c > 0)
+               m_ruleOvf[k] = StringSubstr(opt, c + 1);
+            else
+            if(StringFind(opt, "SPR") == 0 && c > 0)
+               m_ruleSpr[k] = StringToDouble(StringSubstr(opt, c + 1));
+            else
             if(StringFind(opt, "LAD") == 0 && c > 0)
               {
                //--- はしご決済 "LAD:20-35-65-95"：各分数で、残りを等分して少しずつ決済する（最後は保有時間の終わり）
@@ -874,6 +888,10 @@ int CModuleSet::SetRules(const string rules)
                   m_symbol, name, f[1], m_ruleHHMM[k], m_ruleHold[k], f[4], f[5], m_ruleSL[k],
                   m_rulePreMin[k] > 0 ? StringFormat(" 直前%d分の値動き%s%.2f", m_rulePreMin[k], m_rulePreBelow[k] ? "<" : ">", m_rulePreThr[k]) : "",
                   m_rulePartMin[k] > 0 ? StringFormat(" %d分後に%.0f%%を決済", m_rulePartMin[k], m_rulePartFrac[k] * 100.0) : "");
+      if(m_ruleOvf[k] != "" || m_ruleSpr[k] > 0.0)
+         PrintFormat("[AMS] %s 時刻ルール %s:%s%s", m_symbol, name,
+                     m_ruleOvf[k] != "" ? " 受け皿（" + m_ruleOvf[k] + " が上限で切られた分だけ）" : "",
+                     m_ruleSpr[k] > 0.0 ? StringFormat(" スプレッドの上限 %.1f pips", m_ruleSpr[k]) : "");
       if(m_ruleLadN[k] > 0)
          PrintFormat("[AMS] %s 時刻ルール %s: はしご決済 %d段（最初 %d分後）", m_symbol, name, m_ruleLadN[k], m_ruleLadMin[k * LAD_MAX]);
      }
