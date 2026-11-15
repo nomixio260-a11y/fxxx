@@ -167,6 +167,9 @@ input group "=== 実運用向け ==="
 input int              InpOrderRetries      = 3;           // 注文が一時的なエラーで失敗したときの再試行回数
 input bool             InpUseTimer          = true;        // 実運用時、タイマーでも全銘柄を処理する（チャート銘柄のティックが止まっても動く）
 input bool             InpListSymbols       = false;       // 起動時に、業者が扱うすべての銘柄名をログに出して終了する（調査用）
+input string           InpExportBars        = "";          // 調査用：この銘柄（カンマ区切り）の足を AMS_bars_<銘柄>.csv に書き出して終了する（バックテストで使う）
+input int              InpExportBarsMin     = 30;          // 書き出す足の長さ（分：1/5/15/30/60）
+input string           InpExportBarsFrom    = "2015.01.01"; // 書き出しの開始日
 
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
@@ -1232,8 +1235,73 @@ void ProcessAll(void)
   }
 
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| 調査用：指定の銘柄の足を CSV に書き出す（共通フォルダ、サーバー時間）       |
+//+------------------------------------------------------------------+
+void ExportBarsAll(void)
+  {
+   ENUM_TIMEFRAMES tf = PERIOD_M30;
+   switch(InpExportBarsMin)
+     {
+      case 1:  tf = PERIOD_M1;  break;
+      case 5:  tf = PERIOD_M5;  break;
+      case 15: tf = PERIOD_M15; break;
+      case 60: tf = PERIOD_H1;  break;
+      default: tf = PERIOD_M30; break;
+     }
+   string syms[];
+   const int n = StringSplit(InpExportBars, ',', syms);
+   const datetime from = StringToTime(InpExportBarsFrom);
+   for(int i = 0; i < n; i++)
+     {
+      const string sym = syms[i];
+      StringTrimLeft(syms[i]);
+      StringTrimRight(syms[i]);
+      if(StringLen(syms[i]) == 0 || !SymbolSelect(syms[i], true))
+        {
+         PrintFormat("[AMS] 書き出し：%s を選べません", sym);
+         continue;
+        }
+      const int fh = FileOpen("AMS_bars_" + syms[i] + ".csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+      if(fh == INVALID_HANDLE)
+         continue;
+      FileWrite(fh, "time", "open", "high", "low", "close", "tickvol", "spread");
+      int total = 0;
+      datetime t0 = from;
+      const datetime tEnd = TimeCurrent();
+      //--- 1年ずつ取り出す（一度に大量に取ると失敗することがあるため）
+      while(t0 < tEnd)
+        {
+         datetime t1 = t0 + 365 * 86400;
+         if(t1 > tEnd)
+            t1 = tEnd;
+         MqlRates r[];
+         const int got = CopyRates(syms[i], tf, t0, t1 - 1, r);
+         for(int k = 0; k < got; k++)
+            FileWrite(fh, TimeToString(r[k].time, TIME_DATE | TIME_MINUTES), DoubleToString(r[k].open, 6), DoubleToString(r[k].high, 6),
+                      DoubleToString(r[k].low, 6), DoubleToString(r[k].close, 6), (long)r[k].tick_volume, r[k].spread);
+         total += MathMax(got, 0);
+         t0 = t1;
+        }
+      FileClose(fh);
+      PrintFormat("[AMS] 書き出し：%s %d 本（最初の足 %s）", syms[i], total,
+                  TimeToString((datetime)SeriesInfoInteger(syms[i], tf, SERIES_FIRSTDATE)));
+     }
+  }
+
 void OnTick(void)
   {
+   if(StringLen(InpExportBars) > 0)
+     {
+      static bool done = false;
+      if(!done)
+        {
+         done = true;
+         ExportBarsAll();
+         ExpertRemove();
+        }
+      return;
+     }
    ProcessAll();
   }
 

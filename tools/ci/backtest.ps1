@@ -170,6 +170,8 @@ foreach ($f in 'AMS_breakdown.csv', 'AMS_monthly.csv', 'AMS_rulemonth.csv', 'AMS
   $common = Join-Path $env:APPDATA "MetaQuotes\Terminal\Common\Files\$f"
   if (Test-Path $common) { Get-Content $common | Out-File "$out\$f" -Encoding utf8 }
 }
+# 調査用の足の書き出し（InpExportBars）
+Get-ChildItem (Join-Path $env:APPDATA "MetaQuotes\Terminal\Common\Files") -Filter 'AMS_bars_*.csv' -ErrorAction SilentlyContinue | Copy-Item -Destination $out -Force
 $termLog = Get-ChildItem "$dir\logs\*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
 if ($termLog) { Get-Content $termLog.FullName -Encoding Unicode | Out-File "$out\terminal_last.log" -Encoding utf8 }
 $agentLog = Get-ChildItem "$dir\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -like '*logs*' } | Sort-Object LastWriteTime | Select-Object -Last 1
