@@ -51,6 +51,7 @@ input double           InpFixMaxSpreadPips  = 1.5;         // [東京仲値] ス
 input string           InpCalendarRules     = "";          // [時刻ルール] "名前:銘柄|時計|HHMM|保有分|BUY/SELL|日の条件|SLpips" を ; で区切る
 input string           InpCalendarRules2    = "";          // [時刻ルール] 続き（テスターの入力は1つ255文字までのため、分けて書ける）
 input string           InpCalendarRules3    = "";          // [時刻ルール] 続き
+input string           InpCalendarRules4    = "";          // [時刻ルール] 続き（受け皿のルール "OVF:…" など、優先順位の最も低いもの）
 input int              InpAdaptWindow       = 0;           // [自動調整] 直近何回の仮想取引の成績で、ルールを止める/再開するか（0で無効）
 input int              InpAdaptMinTrades    = 20;          // [自動調整] この回数に満たないルールは止めない
 input double           InpAdaptMinPF        = 1.0;         // [自動調整] 直近の PF（コスト後）がこれ未満のルールは止める
@@ -466,7 +467,7 @@ bool CSymbolTrader::Init(const string sym)
          return(false);
       modules.SetTokyoFix(InpFixEntryHHMM, InpFixExitHHMM, InpFixGotobiOnly, InpFixDirection);
       modules.AddHolidays(InpJPHolidays);
-      if(InpEntryMode == ENTRY_CALENDAR && modules.SetRules(InpCalendarRules + "/" + InpCalendarRules2 + "/" + InpCalendarRules3) == 0)
+      if(InpEntryMode == ENTRY_CALENDAR && modules.SetRules(InpCalendarRules + "/" + InpCalendarRules2 + "/" + InpCalendarRules3 + "/" + InpCalendarRules4) == 0)
         {
          PrintFormat("[AMS] %s に当てはまる時刻ルールがないため、この銘柄は取引しません", sym);
          return(false);
