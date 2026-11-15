@@ -2,7 +2,7 @@
 """デモ口座での実運用（フォワードテスト）の成績をまとめる。
 
 入力：reports/live/AMS_live_deals.csv（EA が書き出す取引の記録）と AMS_live_account.csv（残高の推移）
-出力：reports/live/summary.md（スマホでも読みやすい形）
+出力：reports/live/summary.md（スマホでも読みやすい形）と balance.svg（残高の推移のグラフ。追加の部品なしで作る）
 
 使い方: python3 tools/live_summary.py [reports/live]
 """
@@ -10,6 +10,40 @@ import csv
 import os
 import sys
 from collections import defaultdict
+
+
+def balance_svg(points, path):
+    """残高の推移を折れ線の SVG にする（GitHub の画面やスマホでそのまま見られる）。points = [(時刻の文字列, 残高, 有効証拠金)]"""
+    # 同じ値が続く記録はまとめる（グラフを軽くする）
+    pts = [p for i, p in enumerate(points) if i == 0 or i == len(points) - 1 or p[1:] != points[i - 1][1:]]
+    W, H, L, R, T, B = 720, 360, 78, 16, 40, 44
+    vals = [v for _, b, e in pts for v in (b, e)]
+    lo, hi = min(vals), max(vals)
+    if hi - lo < 1:
+        lo, hi = lo * 0.98, hi * 1.02 + 1
+    pad = (hi - lo) * 0.08
+    lo, hi = lo - pad, hi + pad
+    n = max(len(pts) - 1, 1)
+    X = lambda i: L + (W - L - R) * i / n  # noqa: E731
+    Y = lambda v: T + (H - T - B) * (1 - (v - lo) / (hi - lo))  # noqa: E731
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="100%" font-family="sans-serif" font-size="12">',
+           f'<rect width="{W}" height="{H}" fill="#fcfcfb"/>',
+           f'<text x="{L}" y="22" font-size="15" fill="#0b0b0b">デモ口座の残高（円）　青＝残高、灰＝有効証拠金</text>']
+    for k in range(5):
+        v = lo + (hi - lo) * k / 4
+        y = Y(v)
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" stroke="#e4e3df"/>')
+        out.append(f'<text x="{L - 6}" y="{y + 4:.1f}" text-anchor="end" fill="#52514e">{v:,.0f}</text>')
+    for k in sorted({0, n // 2, n}):
+        out.append(f'<text x="{X(k):.1f}" y="{H - 18}" text-anchor="middle" fill="#52514e">{pts[k][0][:10]}</text>')
+    for idx, color, width in ((2, "#9a9994", 1.2), (1, "#2a78d6", 2.2)):
+        d = " ".join(f"{X(i):.1f},{Y(p[idx]):.1f}" for i, p in enumerate(pts))
+        out.append(f'<polyline points="{d}" fill="none" stroke="{color}" stroke-width="{width}"/>')
+    lx, ly = X(len(pts) - 1), Y(pts[-1][1])
+    out.append(f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="4" fill="#2a78d6"/>')
+    out.append(f'<text x="{lx - 8:.1f}" y="{ly - 10:.1f}" text-anchor="end" fill="#0b0b0b" font-size="13">{pts[-1][1]:,.0f} 円</text>')
+    out.append("</svg>")
+    open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
 
 
 def main():
@@ -44,6 +78,8 @@ def main():
                 bal.append((parts[0], float(parts[1]), float(parts[2])))
     if bal:
         lines += [f"- 最新の残高：{bal[-1][1]:,.0f} 円（有効証拠金 {bal[-1][2]:,.0f} 円、{bal[-1][0]} 時点）", ""]
+        balance_svg(bal, os.path.join(d, "balance.svg"))
+        lines += ["![残高の推移](balance.svg)", ""]
     # 月ごとの損益率：その月の最初に記録した残高を基準にする
     start_bal = {}
     for t, b, _ in bal:

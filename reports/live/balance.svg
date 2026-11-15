@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" width="100%" font-family="sans-serif" font-size="12">
+<rect width="720" height="360" fill="#fcfcfb"/>
+<text x="78" y="22" font-size="15" fill="#0b0b0b">デモ口座の残高（円）　青＝残高、灰＝有効証拠金</text>
+<line x1="78" x2="704" y1="316.0" y2="316.0" stroke="#e4e3df"/>
+<text x="72" y="320.0" text-anchor="end" fill="#52514e">2,930,400</text>
+<line x1="78" x2="704" y1="247.0" y2="247.0" stroke="#e4e3df"/>
+<text x="72" y="251.0" text-anchor="end" fill="#52514e">2,965,200</text>
+<line x1="78" x2="704" y1="178.0" y2="178.0" stroke="#e4e3df"/>
+<text x="72" y="182.0" text-anchor="end" fill="#52514e">3,000,000</text>
+<line x1="78" x2="704" y1="109.0" y2="109.0" stroke="#e4e3df"/>
+<text x="72" y="113.0" text-anchor="end" fill="#52514e">3,034,801</text>
+<line x1="78" x2="704" y1="40.0" y2="40.0" stroke="#e4e3df"/>
+<text x="72" y="44.0" text-anchor="end" fill="#52514e">3,069,601</text>
+<text x="78.0" y="342" text-anchor="middle" fill="#52514e">2026.11.13</text>
+<text x="704.0" y="342" text-anchor="middle" fill="#52514e">2026.11.13</text>
+<polyline points="78.0,178.0 704.0,178.0" fill="none" stroke="#9a9994" stroke-width="1.2"/>
+<polyline points="78.0,178.0 704.0,178.0" fill="none" stroke="#2a78d6" stroke-width="2.2"/>
+<circle cx="704.0" cy="178.0" r="4" fill="#2a78d6"/>
+<text x="696.0" y="168.0" text-anchor="end" fill="#0b0b0b" font-size="13">3,000,000 円</text>
+</svg>
