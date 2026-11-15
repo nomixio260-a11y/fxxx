@@ -525,6 +525,16 @@ void CSymbolTrader::OnTick(void)
         }
      }
 
+   //--- 決済を早めるルール（"EXS:60"）は、足の区切りを待たずに決済する
+   if(InpEntryMode == ENTRY_CALENDAR && !pendCloseBuy && !pendCloseSell && modules.EarlyExitDue())
+     {
+      int b = 0, s = 0;
+      risk.CountPositions(b, s);
+      if(b > 0)
+         RequestClose(POSITION_TYPE_BUY, "決済の時刻（早め）");
+      if(s > 0)
+         RequestClose(POSITION_TYPE_SELL, "決済の時刻（早め）");
+     }
    if(IsNewBar())
       OnBar();
    if(pendCloseBuy || pendCloseSell)
