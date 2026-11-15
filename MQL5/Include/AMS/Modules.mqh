@@ -93,6 +93,9 @@ private:
    int               m_rulePreMin[];  // 直前の値動きの条件：何分前からの値動きを見るか（0 = 条件なし）
    double            m_rulePreThr[];  // その値動き（1時間足の平均値幅で割った値）がこれより大きいときだけ入る
    bool              m_rulePreBelow[]; // true のときは「これより小さいときだけ入る」（"PRE30:<-0.37"）
+   int               m_rulePartMin[];  // 部分決済：入ってからこの分数で一部を決済（0 = しない。"PART20:0.5"）
+   double            m_rulePartFrac[]; // 部分決済で決済する割合
+   bool              m_partDone;       // 今の建玉で部分決済を済ませたか
    bool              m_ruleGap[];     // 向きを「週明けの窓と同じ向き」にする（向きの欄が "GAP"）
    double            m_ruleGapMin[];  // 窓の大きさ（平均値幅で割った値）がこれ以上の週だけ（"GAP:0.70"）
    string            m_ruleName[];
@@ -159,6 +162,8 @@ public:
    //--- 先回りの秒数：時刻ルールの判定・決済を、足の始まりのこの秒数前に行う（注文の遅れを吸収するため）
    void              SetLead(const int sec) { m_leadSec = MathMax(sec, 0); }
    datetime          BarTime(void) const;
+   //--- 部分決済の時刻になったら、決済する割合を返す（1回だけ）。なければ 0
+   double            PartialDue(void);
    int               SetRules(const string rules);
    double            PendingRuleSL(void) const;
    void              SetAdaptive(const int window, const int minTrades, const double minPF);
@@ -207,6 +212,7 @@ CModuleSet::CModuleSet(void) : m_symbol(""),
                                m_adMinPF(1.0),
                                m_adSkips(0),
                                m_activeRule(-1),
+                               m_partDone(false),
                                m_activeUntil(0)
   {
   }
@@ -321,6 +327,7 @@ void CModuleSet::MarkEntered(void)
       //--- 決済の時刻 = シグナルを出した足の始まり + 保有時間
       m_activeRule  = m_pendRule;
       m_activeUntil = BarTime() + m_ruleHold[m_pendRule] * 60;
+      m_partDone    = false;
      }
   }
 
@@ -347,6 +354,7 @@ void CModuleSet::RestoreActive(void)
          const datetime bar    = (per > 0) ? (datetime)(opened - opened % per) : opened;
          m_activeRule  = k;
          m_activeUntil = bar + m_ruleHold[k] * 60;
+         m_partDone    = (m_rulePartMin[k] > 0 && TimeCurrent() >= bar + m_rulePartMin[k] * 60);
          PrintFormat("[AMS] %s 再起動後の復元：ルール %s のポジション（%s に建てた）を %s に決済します", m_symbol, m_ruleName[k],
                      TimeToString(opened), TimeToString(m_activeUntil));
          return;
@@ -707,7 +715,7 @@ int CModuleSet::SetRules(const string rules)
       StringReplace(item, ",", "|");
       string f[];
       const int nf = StringSplit(item, '|', f);
-      if(nf != 7 && nf != 8)
+      if(nf < 7 || nf > 9)
         {
          PrintFormat("[AMS] 時刻ルールの書式が正しくありません: %s", items[i]);
          continue;
@@ -756,6 +764,8 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_ruleSLk, m_ruleCount);
       ArrayResize(m_rulePreThr, m_ruleCount);
       ArrayResize(m_rulePreBelow, m_ruleCount);
+      ArrayResize(m_rulePartMin, m_ruleCount);
+      ArrayResize(m_rulePartFrac, m_ruleCount);
       ArrayResize(m_ruleGap, m_ruleCount);
       ArrayResize(m_ruleGapMin, m_ruleCount);
       m_ruleGap[k]    = gapRule;
@@ -792,35 +802,49 @@ int CModuleSet::SetRules(const string rules)
       m_rulePreMin[k] = 0;
       m_rulePreThr[k] = 0.0;
       m_rulePreBelow[k] = false;
-      if(nf == 8 && StringFind(f[7], "GAP") == 0)
+      m_rulePartMin[k] = 0;
+      m_rulePartFrac[k] = 0.0;
+      //--- 8・9つ目（任意）："PRE30:-0.07"（直前の値動きの条件）、"GAP:z"（週明けの窓）、"PART20:0.5"（20分後に半分を決済）
+      for(int x = 7; x < nf; x++)
         {
-         const int c = StringFind(f[7], ":");
-         if(c > 0)
-            m_ruleGapMin[k] = StringToDouble(StringSubstr(f[7], c + 1));
-        }
-      if(nf == 8 && StringFind(f[7], "PRE") == 0)
-        {
-         const int c = StringFind(f[7], ":");
-         if(c > 3)
+         const string opt = f[x];
+         const int c = StringFind(opt, ":");
+         if(StringFind(opt, "GAP") == 0)
            {
-            m_rulePreMin[k] = (int)StringToInteger(StringSubstr(f[7], 3, c - 3));
-            string v = StringSubstr(f[7], c + 1);
-            if(StringFind(v, "<") == 0)
+            if(c > 0)
+               m_ruleGapMin[k] = StringToDouble(StringSubstr(opt, c + 1));
+           }
+         else
+            if(StringFind(opt, "PART") == 0)
               {
-               m_rulePreBelow[k] = true;
-               v = StringSubstr(v, 1);
+               if(c > 4)
+                 {
+                  m_rulePartMin[k]  = (int)StringToInteger(StringSubstr(opt, 4, c - 4));
+                  m_rulePartFrac[k] = MathMin(MathMax(StringToDouble(StringSubstr(opt, c + 1)), 0.0), 1.0);
+                 }
               }
             else
-               if(StringFind(v, ">") == 0)
-                  v = StringSubstr(v, 1);
-            m_rulePreThr[k] = StringToDouble(v);
-           }
+               if(StringFind(opt, "PRE") == 0 && c > 3)
+                 {
+                  m_rulePreMin[k] = (int)StringToInteger(StringSubstr(opt, 3, c - 3));
+                  string v = StringSubstr(opt, c + 1);
+                  if(StringFind(v, "<") == 0)
+                    {
+                     m_rulePreBelow[k] = true;
+                     v = StringSubstr(v, 1);
+                    }
+                  else
+                     if(StringFind(v, ">") == 0)
+                        v = StringSubstr(v, 1);
+                  m_rulePreThr[k] = StringToDouble(v);
+                 }
         }
       m_ruleName[k]   = name;
       m_rulePrio[k]   = i;
-      PrintFormat("[AMS] %s 時刻ルール %s: %s %04d から %d 分 %s（%s）SL %.0f pips%s",
+      PrintFormat("[AMS] %s 時刻ルール %s: %s %04d から %d 分 %s（%s）SL %.0f pips%s%s",
                   m_symbol, name, f[1], m_ruleHHMM[k], m_ruleHold[k], f[4], f[5], m_ruleSL[k],
-                  m_rulePreMin[k] > 0 ? StringFormat(" 直前%d分の値動き%s%.2f", m_rulePreMin[k], m_rulePreBelow[k] ? "<" : ">", m_rulePreThr[k]) : "");
+                  m_rulePreMin[k] > 0 ? StringFormat(" 直前%d分の値動き%s%.2f", m_rulePreMin[k], m_rulePreBelow[k] ? "<" : ">", m_rulePreThr[k]) : "",
+                  m_rulePartMin[k] > 0 ? StringFormat(" %d分後に%.0f%%を決済", m_rulePartMin[k], m_rulePartFrac[k] * 100.0) : "");
      }
    return(m_ruleCount);
   }
@@ -928,6 +952,20 @@ datetime CModuleSet::BarTime(void) const
       return(t0);
    const datetime v = (datetime)(((long)(TimeCurrent() + m_leadSec) / per) * per);
    return(v > t0 ? v : t0);
+  }
+
+double CModuleSet::PartialDue(void)
+  {
+   if(m_mode != ENTRY_CALENDAR || m_partDone || m_activeUntil == 0 || m_activeRule < 0 || m_activeRule >= m_ruleCount)
+      return(0.0);
+   const int k = m_activeRule;
+   if(m_rulePartMin[k] <= 0 || m_rulePartFrac[k] <= 0.0)
+      return(0.0);
+   const datetime opened = m_activeUntil - m_ruleHold[k] * 60;
+   if(BarTime() < opened + m_rulePartMin[k] * 60)
+      return(0.0);
+   m_partDone = true;
+   return(m_rulePartFrac[k]);
   }
 
 double CModuleSet::CalendarSignal(void)

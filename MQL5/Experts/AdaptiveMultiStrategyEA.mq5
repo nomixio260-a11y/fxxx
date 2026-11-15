@@ -592,6 +592,13 @@ void CSymbolTrader::OnBar(void)
          RequestClose(POSITION_TYPE_BUY, "ロジックの決済条件");
       if(sells > 0 && modules.ExitSignal(POSITION_TYPE_SELL))
          RequestClose(POSITION_TYPE_SELL, "ロジックの決済条件");
+      //--- 部分決済（ルールに "PART20:0.5" などの指定があるとき）
+      if(InpEntryMode == ENTRY_CALENDAR && (buys > 0 || sells > 0) && !pendCloseBuy && !pendCloseSell)
+        {
+         const double frac = modules.PartialDue();
+         if(frac > 0.0)
+            risk.ClosePartial(buys > 0 ? POSITION_TYPE_BUY : POSITION_TYPE_SELL, frac, "部分決済の時刻");
+        }
       score     = modules.EntrySignal(signals[STRAT_MEANREV]);
       threshold = 0.5;
       tag       = EntryModeShortName(InpEntryMode);

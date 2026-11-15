@@ -60,6 +60,7 @@ public:
    int               CountPositions(int &buys, int &sells);
    bool              CloseAll(const string reason);
    bool              CloseDirection(const ENUM_POSITION_TYPE type, const string reason);
+   bool              ClosePartial(const ENUM_POSITION_TYPE type, const double fraction, const string reason);
    void              ManageStops(const double atr, const double beTriggerAtr, const double beOffsetPips,
                                  const double trailStartAtr, const double trailDistAtr,
                                  const double trailStepPips);
@@ -347,6 +348,64 @@ bool CRiskManager::CloseDirection(const ENUM_POSITION_TYPE type, const string re
         }
       else
          PrintFormat("[AMS] 決済 #%I64u (%s)", ticket, reason);
+     }
+   m_trade.SetAsyncMode(false);
+   return(ok);
+  }
+
+//+------------------------------------------------------------------+
+//| 同じ向きの建玉の合計のうち、fraction の割合だけ決済する（部分決済）       |
+//| 分けて注文した建玉は、丸ごと決済できるものから順に決済し、端数は一部決済   |
+//+------------------------------------------------------------------+
+bool CRiskManager::ClosePartial(const ENUM_POSITION_TYPE type, const double fraction, const string reason)
+  {
+   double total = 0.0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      if(!m_pos.SelectByIndex(i))
+         continue;
+      if(m_pos.Symbol() != m_symbol || (ulong)m_pos.Magic() != m_magic || m_pos.PositionType() != type)
+         continue;
+      total += m_pos.Volume();
+     }
+   double rest = NormalizeVolume(total * fraction);
+   if(rest <= 0.0)
+      return(true);
+   bool ok = true;
+   if(m_asyncClose)
+      m_trade.SetAsyncMode(true);
+   for(int i = PositionsTotal() - 1; i >= 0 && rest > 1e-9; i--)
+     {
+      if(!m_pos.SelectByIndex(i))
+         continue;
+      if(m_pos.Symbol() != m_symbol || (ulong)m_pos.Magic() != m_magic || m_pos.PositionType() != type)
+         continue;
+      const ulong  ticket = m_pos.Ticket();
+      const double vol    = m_pos.Volume();
+      bool done;
+      double closed;
+      if(vol <= rest + 1e-9)
+        {
+         done   = m_trade.PositionClose(ticket);
+         closed = vol;
+        }
+      else
+        {
+         closed = NormalizeVolume(rest);
+         if(closed <= 0.0)
+            break;
+         done = m_trade.PositionClosePartial(ticket, closed);
+        }
+      if(done)
+        {
+         rest -= closed;
+         PrintFormat("[AMS] 部分決済 #%I64u %.2f lot (%s)", ticket, closed, reason);
+        }
+      else
+        {
+         PrintFormat("[AMS] 部分決済の失敗 #%I64u retcode=%u %s", ticket, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+         ok = false;
+        }
      }
    m_trade.SetAsyncMode(false);
    return(ok);
