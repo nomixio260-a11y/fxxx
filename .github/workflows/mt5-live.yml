@@ -1,7 +1,7 @@
 name: MT5 Live (OANDA demo)
 
 # OANDA デモ口座で EA を実際に動かす（フォワードテスト）。
-# - 1回あたり最大約5.5時間動かし、終わる前に次の回を起動して、途切れずにつなぐ。
+# - 1回あたり最大約5.5時間動かす。各回の始めに次の回を予約し（前の回が終わるまで待つ）、途切れずにつなぐ。
 #   （スケジュール起動は既定のブランチでしか動かないため、この方式にしている）
 # - 前の回が終わるまで、次の回は待つ（同じ口座で2つの MT5 が同時に注文しないように）。
 # - 止めるには：リポジトリの変数（Settings → Secrets and variables → Actions → Variables）に
@@ -68,6 +68,18 @@ jobs:
           key: mt5-live-state-${{ github.run_id }}
           restore-keys: mt5-live-state-
 
+      # 次の回を、この回の始めに予約しておく。concurrency（mt5-live）のため、次の回はこの回が終わるまで待ち、
+      # 終わると始まる。GitHub のサーバーが途中で落ちて、最後の手順まで進まなかった場合も、つなぎが切れない。
+      # （2026年11月15日に、サーバーが落ちて引き継ぎが途切れたための対策）
+      - name: Queue the next run
+        if: ${{ (inputs.chain || 'true') == 'true' && env.LIVE_ENABLED != 'false' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run mt5-live.yml --ref "$GITHUB_REF_NAME" \
+            -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を予約しました（この回が終わると始まります）"
+
       - name: Run EA on the demo account
         shell: pwsh
         run: ./tools/ci/live.ps1
@@ -85,6 +97,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # 始めに予約した次の回が待っていれば、何もしない（予約に失敗していたときだけ、ここで起動する）
+          n=$(gh run list --workflow mt5-live.yml --branch "$GITHUB_REF_NAME" --limit 20 --json status \
+                --jq '[.[] | select(.status=="pending" or .status=="queued" or .status=="waiting" or .status=="requested")] | length' || echo 0)
+          if [ "${n:-0}" -gt 0 ]; then echo "次の回は予約済みです"; exit 0; fi
           gh workflow run mt5-live.yml --ref "$GITHUB_REF_NAME" \
             -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を起動しました"
 
