@@ -38,8 +38,12 @@ def month_index(idx):
     return ((idx.year - 2015) * 12 + idx.month - 1).values
 
 
+FROM = os.environ.get("AMS_WF_FROM", "2015-01-01")  # 集計を始める日（速くするため、直近だけ調べるときは遅らせる）
+
+
 def build(pair):
     df = D.bars(pair, "5min")
+    df = df[df.index >= pd.Timestamp(FROM)]
     pip = D.pip_size(pair)
     idx = df.index
     o = df["o"].values
@@ -138,12 +142,12 @@ def select(metas, S_, Q_, N_, cost, lo, hi, tmin, K, nmin=40):
     return chosen
 
 
-def evaluate(pairs, L=4, tmin=3.0, K=20, step=6, start_year=2019, verbose=True):
+def evaluate(pairs, L=4, tmin=3.0, K=20, step=6, start_year=2019, start_month=1, verbose=True):
     metas, S_, Q_, N_, cost = load(pairs)
     months = pd.period_range("2015-01", periods=NM, freq="M")
     out = np.full(NM, np.nan)
     picks = {}
-    first = (start_year - 2015) * 12
+    first = (start_year - 2015) * 12 + start_month - 1
     for m0 in range(first, NM, step):
         lo, hi = m0 - 12 * L, m0
         if lo < 0:
@@ -179,7 +183,8 @@ if __name__ == "__main__":
     else:
         L, t, K, step = (float(x) for x in (sys.argv[2:6] + ["4", "3", "20", "6"][len(sys.argv[2:6]):]))
         pairs = [p for p in CORE + MORE if os.path.exists(os.path.join(D.CACHE, f"wf_{p}.npz"))]
-        res, picks = evaluate(pairs, int(L), t, int(K), int(step))
+        sy = os.environ.get("AMS_WF_START", "2019-01")
+        res, picks = evaluate(pairs, int(L), t, int(K), int(step), int(sy[:4]), int(sy[5:7]))
         print(report(res, f"L={L:.0f}年 t≥{t} K={K:.0f} 選び直し{step:.0f}か月 銘柄{len(pairs)}"))
         last = sorted(picks)[-1]
         print("最新の選択", last, picks[last][:10])
