@@ -132,20 +132,28 @@ def scan(sym, df, des_t):
     return rows, n_tests
 
 
+def one(path, des_t):
+    sym, df = load(path)
+    if len(df) < 1000:
+        return [], 0, f"{sym}: 足が少ない（{len(df)} 本）"
+    r, n = scan(sym, df, des_t)
+    line = f"{sym}: {df.index[0].date()}〜{df.index[-1].date()}、{len(df):,} 本、候補 {len(r)}"
+    print(line, flush=True)
+    return r, n, line
+
+
 def main():
     folder = sys.argv[1]
     des_t = float(sys.argv[2]) if len(sys.argv) > 2 else 3.0
+    from multiprocessing import Pool
+    paths = sorted(glob.glob(os.path.join(folder, "AMS_bars_*.csv")))
+    with Pool(3) as pool:
+        parts = pool.starmap(one, [(p, des_t) for p in paths])
     rows, n_tests, info = [], 0, []
-    for path in sorted(glob.glob(os.path.join(folder, "AMS_bars_*.csv"))):
-        sym, df = load(path)
-        if len(df) < 1000:
-            info.append(f"{sym}: 足が少ない（{len(df)} 本）")
-            continue
-        r, n = scan(sym, df, des_t)
+    for r, n, line in parts:
         rows += r
         n_tests += n
-        info.append(f"{sym}: {df.index[0].date()}〜{df.index[-1].date()}、{len(df):,} 本、候補 {len(r)}")
-        print(info[-1], flush=True)
+        info.append(line)
     res = pd.DataFrame(rows)
     out_dir = os.path.join(D.ROOT, "reports", "research")
     res.to_csv(os.path.join(out_dir, "oanda_scan_all.csv"), index=False)
