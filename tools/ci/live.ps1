@@ -59,25 +59,10 @@ Period=M5
 $conf = Join-Path $dir 'ams_live.ini'
 $ini | Out-File -FilePath $conf -Encoding ascii
 
-$script:shown = @{}
-function Show-NewLines([string]$pattern, [string]$tag) {
-  $found = @()
-  Get-ChildItem $pattern -ErrorAction SilentlyContinue | ForEach-Object {
-    $lines = @(Get-Content $_.FullName -Encoding Unicode -ErrorAction SilentlyContinue)
-    $s = if ($script:shown.ContainsKey($_.FullName)) { $script:shown[$_.FullName] } else { 0 }
-    for ($i = $s; $i -lt $lines.Count; $i++) {
-      # ログイン成功の確認は、口座番号を隠す前に行う
-      if ($lines[$i] -match 'authorized on') { $script:authorized = $true }
-      # 口座番号を含む行は表示しない（ログは公開されるため）
-      if ($env:MT5_LOGIN -and $lines[$i].Contains($env:MT5_LOGIN)) { continue }
-      Write-Host "[$tag] $($lines[$i])"; $found += $lines[$i]
-    }
-    $script:shown[$_.FullName] = $lines.Count
-  }
-  return $found
-}
+# ログの新しい行だけを読む関数（tools/ci/lognew.ps1）
+. (Join-Path $PSScriptRoot 'lognew.ps1')
 
-$eaLines = @()
+$eaLines = New-Object System.Collections.Generic.List[string]
 try {
   $p = Start-Process -FilePath (Join-Path $dir 'terminal64.exe') -ArgumentList '/portable', "/config:`"$conf`"" -PassThru
   Start-Sleep -Seconds 90
@@ -87,7 +72,7 @@ try {
     if ($p.HasExited) { Write-Host 'ターミナルが終了しました'; break }
     $new = @(Show-NewLines "$dir\logs\*.log" 'terminal')
     $ea  = @(Show-NewLines "$dir\MQL5\Logs\*.log" 'ea')
-    $eaLines += $ea | Where-Object { $_ -match '\[AMS\]' }
+    foreach ($l in $ea) { if ($l -match '\[AMS\]') { $eaLines.Add($l) } }
     if ($new | Where-Object { $_ -match 'authorization on .* failed' }) { Write-Host 'NG: ログインに失敗しました'; break }
     Start-Sleep -Seconds 60
   }
@@ -100,7 +85,7 @@ try {
   while ((Get-Process terminal64 -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
   Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
 }
-$eaLines += @(Show-NewLines "$dir\MQL5\Logs\*.log" 'ea') | Where-Object { $_ -match '\[AMS\]' }
+foreach ($l in @(Show-NewLines "$dir\MQL5\Logs\*.log" 'ea')) { if ($l -match '\[AMS\]') { $eaLines.Add($l) } }
 
 # 記録を reports/live にまとめる（口座番号やパスワードは含めない）
 foreach ($f in 'AMS_live_deals.csv', 'AMS_live_account.csv') {

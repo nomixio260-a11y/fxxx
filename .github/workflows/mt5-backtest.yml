@@ -101,6 +101,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 実運用のスクリプトが使う、ログの読み取り（tools/ci/lognew.ps1）の動作確認
+      - name: Self-test log reader
+        shell: pwsh
+        run: ./tools/ci/test_lognew.ps1
+
       - name: Install MetaTrader 5
         shell: pwsh
         run: ./tools/ci/install_mt5.ps1
