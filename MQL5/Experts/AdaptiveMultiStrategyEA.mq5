@@ -351,6 +351,29 @@ void RecordLatency(const double sec)
 //+------------------------------------------------------------------+
 //| ルールごとのリスクの倍率（InpRuleRiskMul から読む。書いていなければ 1.0）|
 //+------------------------------------------------------------------+
+double OpenGainPips(const string sym, const ENUM_POSITION_TYPE type)
+  {
+   //--- この EA の、その銘柄・向きの建玉の平均の建値から、今の決済値（買いは売値、売りは買値）までの含み益（pips）
+   double vol = 0.0, px = 0.0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      const ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || PositionGetString(POSITION_SYMBOL) != sym || (ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic ||
+         (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) != type)
+         continue;
+      const double v = PositionGetDouble(POSITION_VOLUME);
+      vol += v;
+      px  += v * PositionGetDouble(POSITION_PRICE_OPEN);
+     }
+   if(vol <= 0.0)
+      return(0.0);
+   px /= vol;
+   const double pip = PipSize(sym);
+   if(pip <= 0.0)
+      return(0.0);
+   return(type == POSITION_TYPE_BUY ? (SymbolInfoDouble(sym, SYMBOL_BID) - px) / pip : (px - SymbolInfoDouble(sym, SYMBOL_ASK)) / pip);
+  }
+
 double RuleRiskMul(const string rule)
   {
    if(InpRuleRiskMul == "" || rule == "")
@@ -629,6 +652,22 @@ void CSymbolTrader::OnBar(void)
          RequestClose(POSITION_TYPE_BUY, "ロジックの決済条件");
       if(sells > 0 && modules.ExitSignal(POSITION_TYPE_SELL))
          RequestClose(POSITION_TYPE_SELL, "ロジックの決済条件");
+      //--- 途中の見直し（ルールに "CUT20:3" などの指定があるとき）：その時点で基準の pips 以上勝っていなければ決済
+      if(InpEntryMode == ENTRY_CALENDAR && (buys > 0 || sells > 0) && !pendCloseBuy && !pendCloseSell)
+        {
+         const double need = modules.CutDue();
+         if(need > -1e8)
+           {
+            const double gain = OpenGainPips(symbol, buys > 0 ? POSITION_TYPE_BUY : POSITION_TYPE_SELL);
+            if(gain < need)
+              {
+               PrintFormat("[AMS] %s 途中の見直し：%.1f pips（基準 %.1f）なので決済", symbol, gain, need);
+               RequestClose(buys > 0 ? POSITION_TYPE_BUY : POSITION_TYPE_SELL, "途中の見直し");
+              }
+            else
+               PrintFormat("[AMS] %s 途中の見直し：%.1f pips（基準 %.1f）なので保有を続ける", symbol, gain, need);
+           }
+        }
       //--- 部分決済（ルールに "PART20:0.5" などの指定があるとき）
       if(InpEntryMode == ENTRY_CALENDAR && (buys > 0 || sells > 0) && !pendCloseBuy && !pendCloseSell)
         {

@@ -106,6 +106,9 @@ private:
    string            m_ruleOvf[];     // 受け皿：このルールは、指定のルールが最大ロットの上限で切られた分だけ注文する（"OVF:G3F"）
    double            m_ruleSpr[];     // このルールのスプレッドの上限（pips。0 = 共通の InpFixMaxSpreadPips。"SPR:3"）
    int               m_ruleExs[];     // 決済をこの秒数だけ早める（0 = 足の区切りで決済。"EXS:60" = 保有時間の終わりの60秒前）
+   int               m_ruleCutMin[];  // 途中の見直し："CUT20:3" = 入ってから20分の時点で、3 pips 以上勝っていなければ決済（勝っていれば保有時間の終わりまで持つ）
+   double            m_ruleCutPips[];
+   bool              m_cutDone;       // 今の建玉で途中の見直しを済ませたか
    string            m_ruleName[];
    int               m_rulePrio[];    // 優先順位（入力に書いた順。小さいほど先に注文する）
    int               m_pendRule;      // シグナルを出したルール（エントリー待ち）
@@ -186,6 +189,7 @@ public:
    string            PendingRuleOvf(void) const { return(m_pendRule >= 0 ? m_ruleOvf[m_pendRule] : ""); }
    double            PendingRuleSpread(void) const { return(m_pendRule >= 0 ? m_ruleSpr[m_pendRule] : 0.0); }
    bool              EarlyExitDue(void) const;
+   double            CutDue(void);    // 途中の見直しの時刻になったら、その基準（pips）を返す（1回だけ）。それ以外は -1e9
    datetime          TokyoTime(const datetime serverTime) const;
    double            EntrySignal(const double meanRevSignal);
    bool              ExitSignal(const ENUM_POSITION_TYPE type);
@@ -226,6 +230,7 @@ CModuleSet::CModuleSet(void) : m_symbol(""),
                                m_activeRule(-1),
                                m_partDone(false),
                                m_ladStage(0),
+                               m_cutDone(false),
                                m_activeUntil(0)
   {
   }
@@ -342,6 +347,7 @@ void CModuleSet::MarkEntered(void)
       m_activeUntil = BarTime() + m_ruleHold[m_pendRule] * 60;
       m_partDone    = false;
       m_ladStage    = 0;
+      m_cutDone     = false;
      }
   }
 
@@ -369,6 +375,7 @@ void CModuleSet::RestoreActive(void)
          m_activeRule  = k;
          m_activeUntil = bar + m_ruleHold[k] * 60;
          m_partDone    = (m_rulePartMin[k] > 0 && TimeCurrent() >= bar + m_rulePartMin[k] * 60);
+         m_cutDone  = (m_ruleCutMin[k] > 0 && TimeCurrent() >= bar + m_ruleCutMin[k] * 60);
          //--- はしご決済：時刻を過ぎた段は済んだものとする（再起動の前に決済したはず）
          m_ladStage = 0;
          for(int j = 0; j < m_ruleLadN[k]; j++)
@@ -792,11 +799,15 @@ int CModuleSet::SetRules(const string rules)
       ArrayResize(m_ruleOvf, m_ruleCount);
       ArrayResize(m_ruleSpr, m_ruleCount);
       ArrayResize(m_ruleExs, m_ruleCount);
+      ArrayResize(m_ruleCutMin, m_ruleCount);
+      ArrayResize(m_ruleCutPips, m_ruleCount);
       m_ruleGap[k]    = gapRule;
       m_ruleGapMin[k] = 0.0;
       m_ruleOvf[k] = "";
       m_ruleSpr[k] = 0.0;
       m_ruleExs[k] = 0;
+      m_ruleCutMin[k] = 0;
+      m_ruleCutPips[k] = 0.0;
       ArrayResize(m_ruleName, m_ruleCount);
       ArrayResize(m_rulePrio, m_ruleCount);
       ArrayResize(m_vOpen, m_ruleCount);
@@ -852,6 +863,12 @@ int CModuleSet::SetRules(const string rules)
             if(StringFind(opt, "EXS") == 0 && c > 0)
                m_ruleExs[k] = (int)StringToInteger(StringSubstr(opt, c + 1));
             else
+            if(StringFind(opt, "CUT") == 0 && c > 3)
+              {
+               m_ruleCutMin[k]  = (int)StringToInteger(StringSubstr(opt, 3, c - 3));
+               m_ruleCutPips[k] = StringToDouble(StringSubstr(opt, c + 1));
+              }
+            else
             if(StringFind(opt, "LAD") == 0 && c > 0)
               {
                //--- はしご決済 "LAD:20-35-65-95"：各分数で、残りを等分して少しずつ決済する（最後は保有時間の終わり）
@@ -897,6 +914,8 @@ int CModuleSet::SetRules(const string rules)
                   m_rulePartMin[k] > 0 ? StringFormat(" %d分後に%.0f%%を決済", m_rulePartMin[k], m_rulePartFrac[k] * 100.0) : "");
       if(m_ruleExs[k] > 0)
          PrintFormat("[AMS] %s 時刻ルール %s: 決済を %d 秒早める", m_symbol, name, m_ruleExs[k]);
+      if(m_ruleCutMin[k] > 0)
+         PrintFormat("[AMS] %s 時刻ルール %s: %d 分後に %.1f pips 以上勝っていなければ決済", m_symbol, name, m_ruleCutMin[k], m_ruleCutPips[k]);
       if(m_ruleOvf[k] != "" || m_ruleSpr[k] > 0.0)
          PrintFormat("[AMS] %s 時刻ルール %s:%s%s", m_symbol, name,
                      m_ruleOvf[k] != "" ? " 受け皿（" + m_ruleOvf[k] + " が上限で切られた分だけ）" : "",
@@ -1024,6 +1043,20 @@ bool CModuleSet::EarlyExitDue(void) const
    if(e <= 0)
       return(false);
    return(TimeCurrent() + m_leadSec >= m_activeUntil - e);
+  }
+
+double CModuleSet::CutDue(void)
+  {
+   if(m_mode != ENTRY_CALENDAR || m_cutDone || m_activeUntil == 0 || m_activeRule < 0 || m_activeRule >= m_ruleCount)
+      return(-1e9);
+   const int k = m_activeRule;
+   if(m_ruleCutMin[k] <= 0)
+      return(-1e9);
+   const datetime opened = m_activeUntil - m_ruleHold[k] * 60;
+   if(BarTime() < opened + m_ruleCutMin[k] * 60)
+      return(-1e9);
+   m_cutDone = true;
+   return(m_ruleCutPips[k]);
   }
 
 double CModuleSet::PartialDue(void)
