@@ -20,7 +20,7 @@ on:
       preset:
         description: "使うプリセット（MQL5/Presets のファイル名）"
         required: false
-        default: "AMS_Calendar_Portfolio.set"
+        default: "AMS_CarryTrend.set"
       chain:
         description: "終わる前に次の回を起動して続けるか（true / false）"
         required: false
@@ -43,7 +43,7 @@ jobs:
       MT5_SERVER: ${{ secrets.MT5_SERVER }}
       MT5_INSTALLER_URL: ${{ vars.MT5_INSTALLER_URL || 'https://download.mql5.com/cdn/web/oanda.corporation/mt5/oanda5setup.exe' }}
       LIVE_MINUTES: ${{ inputs.minutes || '330' }}
-      LIVE_PRESET: ${{ inputs.preset || 'AMS_Calendar_Portfolio.set' }}
+      LIVE_PRESET: ${{ inputs.preset || 'AMS_CarryTrend.set' }}
       LIVE_ENABLED: ${{ vars.LIVE_ENABLED || 'true' }}
       PYTHONIOENCODING: utf-8
     steps:

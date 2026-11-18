@@ -53,6 +53,7 @@ private:
    double            m_slVolMul;
    datetime          m_lastRebalance;
    string            m_gvKey;
+   string            m_stateFile;    // 前回の入れ替えの時刻（共通フォルダ。デモ口座の回をまたいで引き継ぐ）
 
    bool              DailyReturns(const string sym, double &r[]);
    double            Std(const double &x[], const int from, const int count);
@@ -96,6 +97,7 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
    m_band         = band;
    m_slVolMul     = slVolMul;
    m_gvKey        = gvKey;
+   m_stateFile    = StringFormat("AMS_ct_state_%I64u.txt", magic);
    m_n            = ArraySize(syms);
    ArrayResize(m_sym, m_n);
    for(int i = 0; i < m_n; i++)
@@ -107,8 +109,21 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
                   m_sym[i], (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_MODE),
                   SwapAnnualPct(m_sym[i], true), SwapAnnualPct(m_sym[i], false));
      }
-   if(!MQLInfoInteger(MQL_TESTER) && GlobalVariableCheck(m_gvKey))
-      m_lastRebalance = (datetime)GlobalVariableGet(m_gvKey);
+   if(!MQLInfoInteger(MQL_TESTER))
+     {
+      if(GlobalVariableCheck(m_gvKey))
+         m_lastRebalance = (datetime)GlobalVariableGet(m_gvKey);
+      const int fh = FileOpen(m_stateFile, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+      if(fh != INVALID_HANDLE)
+        {
+         const datetime t = (datetime)StringToInteger(FileReadString(fh));
+         FileClose(fh);
+         if(t > m_lastRebalance)
+            m_lastRebalance = t;
+        }
+      if(m_lastRebalance > 0)
+         PrintFormat("[AMS] 金利差＋トレンド：前回の入れ替え %s", TimeToString(m_lastRebalance, TIME_DATE));
+     }
    PrintFormat("[AMS] 金利差＋トレンド：%d ペア、トレンド %d 日、金利差 %.1f%% 以上、上位 %d、急変 %.1f 倍、目標の年率ボラティリティ %.1f%%、"
                "建玉の合計の上限 %.1f 倍、入れ替え %d 日ごと（サーバー時刻 %d 時以降）",
                m_n, m_trendDays, m_minCarry, m_topK, m_crashMul, m_volTarget, m_maxLev, m_rbDays, m_hour);
@@ -535,7 +550,15 @@ void CCarryTrend::OnTick(void)
       return;
    m_lastRebalance = today;
    if(!MQLInfoInteger(MQL_TESTER))
+     {
       GlobalVariableSet(m_gvKey, (double)m_lastRebalance);
+      const int fh = FileOpen(m_stateFile, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+      if(fh != INVALID_HANDLE)
+        {
+         FileWriteString(fh, IntegerToString((long)m_lastRebalance));
+         FileClose(fh);
+        }
+     }
   }
 
 #endif // AMS_CARRYTREND_MQH
