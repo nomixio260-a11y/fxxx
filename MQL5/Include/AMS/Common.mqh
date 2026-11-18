@@ -30,7 +30,8 @@ enum ENUM_AMS_ENTRY_MODE
    ENTRY_PULLBACK    = 3,   // 押し目買い/戻り売り
    ENTRY_ASIA_MR     = 4,   // アジア時間の逆張り
    ENTRY_TOKYO_FIX   = 5,   // 東京仲値（ゴトー日）
-   ENTRY_CALENDAR    = 6    // 時刻ルール（複数）
+   ENTRY_CALENDAR    = 6,   // 時刻ルール（複数）
+   ENTRY_CARRY       = 7    // 金利差＋トレンド（日付・時刻を判断に使わない、83章）
   };
 
 //--- 売買ロジック

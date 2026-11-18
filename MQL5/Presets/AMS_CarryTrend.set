@@ -1,0 +1,20 @@
+; AdaptiveMultiStrategyEA - carry + trend (entry mode 7, chapters 82-83). No specific days and no time-of-day habits are used for decisions.
+; Each week: for 17 pairs, compute the annual swap from the account's own swap values; keep pairs where the swap-earning side
+; agrees with the 60-day price direction and volatility has not suddenly doubled; hold the top 5 by carry / volatility,
+; sized so the whole portfolio targets 10% annual volatility (gross at most 5x equity, margin at most 90%).
+; Attach to a USDJPY H1 (or M5) chart.
+InpEntryMode=7
+InpSymbols=USDJPY,EURUSD,EURJPY,GBPJPY,AUDJPY,GBPUSD,AUDCAD,AUDNZD,AUDUSD,CADJPY,CHFJPY,EURGBP,NZDCAD,NZDJPY,NZDUSD,USDCAD,USDCHF
+InpCtTrendDays=60
+InpCtMinCarry=1.0
+InpCtTopK=5
+InpCtCrashMul=2.0
+InpCtVolTarget=10.0
+InpCtMaxLev=5.0
+InpCtRebalanceDays=7
+InpCtHour=3
+InpCtBand=0.25
+InpCtSLVolMul=6.0
+InpMaxMarginUsePct=90.0
+InpSplitOrders=true
+InpAsyncOrders=false

@@ -17,6 +17,7 @@
 #include <AMS\RiskManager.mqh>
 #include <AMS\TradeFilters.mqh>
 #include <AMS\Modules.mqh>
+#include <AMS\CarryTrend.mqh>
 
 //==================================================================
 // 入力パラメータ
@@ -172,6 +173,18 @@ input string           InpExportBars        = "";          // 調査用：取引
 input int              InpExportBarsMin     = 30;          // 書き出す足の長さ（分：1/5/15/30/60）
 input string           InpExportBarsFrom    = "2015.01.01"; // 書き出しの開始日
 
+input group "=== 金利差＋トレンド（方式 7、InpEntryMode=7） ==="
+input int              InpCtTrendDays       = 60;          // 過去何日の値動きの向きを見るか
+input double           InpCtMinCarry        = 1.0;         // 受け取れるスワップがこの年率（%）以上のペアだけ
+input int              InpCtTopK            = 5;           // 金利差 ÷ 値動きの大きさ の上位いくつを持つか
+input double           InpCtCrashMul        = 2.0;         // 直近10日の値動きが120日のこの倍数を超えたペアは持たない（0で無効）
+input double           InpCtVolTarget       = 10.0;        // 全体の目標の年率ボラティリティ（%）
+input double           InpCtMaxLev          = 5.0;         // 建玉の合計 ÷ 有効証拠金 の上限
+input int              InpCtRebalanceDays   = 7;           // 入れ替えの間隔（日）
+input int              InpCtHour            = 3;           // 入れ替えはサーバー時刻のこの時以降（日付の変わり目のスプレッド拡大を避けるため）
+input double           InpCtBand            = 0.25;        // 今の建玉と目標の差がこの割合未満なら入れ替えない（無駄な売買を減らす）
+input double           InpCtSLVolMul        = 6.0;         // 急変に備えた損切り：日々の値動きの何倍か（0で置かない）
+
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
 input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）がこれを超えたら評価値 0
@@ -180,6 +193,8 @@ input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）が
 // 銘柄ごとの売買
 //==================================================================
 CTrade g_trade;
+CCarryTrend g_carry;          // 方式 7（金利差＋トレンド）
+bool        g_carryMode = false;
 double g_weights[4][AMS_STRATEGY_COUNT];   // [REGIME][STRATEGY]
 double g_peakEquity = 0.0;
 double g_monthStartBal = 0.0;   // 月初の残高（月間目標の判定用）
@@ -1184,6 +1199,38 @@ int OnInit(void)
    else
       StringSplit(InpSymbols, ',', names);
 
+   //--- 方式 7（金利差＋トレンド）：銘柄ごとの売買の仕組みは使わず、全体で建玉を決める
+   if(InpEntryMode == ENTRY_CARRY)
+     {
+      string syms[];
+      for(int i = 0; i < ArraySize(names); i++)
+        {
+         const string sym = ResolveSymbol(names[i]);
+         if(sym == "")
+           {
+            PrintFormat("[AMS] 銘柄 %s は口座に無いため除外します", names[i]);
+            continue;
+           }
+         const int n = ArraySize(syms);
+         ArrayResize(syms, n + 1);
+         syms[n] = sym;
+        }
+      if(!g_carry.Init(GetPointer(g_trade), InpMagic, syms, InpCtTrendDays, InpCtMinCarry, InpCtTopK, InpCtCrashMul,
+                       InpCtVolTarget, InpCtMaxLev, InpMaxMarginUsePct, InpCtRebalanceDays, InpCtHour, InpCtBand,
+                       InpCtSLVolMul, GVName("ct_last")))
+        {
+         Print("[AMS] 金利差＋トレンド：取引できる銘柄がありません");
+         return(INIT_FAILED);
+        }
+      g_carryMode  = true;
+      g_peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+      g_halted     = false;
+      if(!MQLInfoInteger(MQL_TESTER) && InpUseTimer)
+         EventSetTimer(2);
+      PrintFormat("[AMS] エントリーの方式: %s", EnumToString(InpEntryMode));
+      return(INIT_SUCCEEDED);
+     }
+
    for(int i = 0; i < ArraySize(names); i++)
      {
       const string sym = ResolveSymbol(names[i]);
@@ -1402,6 +1449,11 @@ void OnTick(void)
         }
       return;
      }
+   if(g_carryMode)
+     {
+      g_carry.OnTick();
+      return;
+     }
    ProcessAll();
   }
 
@@ -1410,6 +1462,17 @@ void OnTick(void)
 //+------------------------------------------------------------------+
 void OnTimer(void)
   {
+   if(g_carryMode)
+     {
+      g_carry.OnTick();
+      static datetime lastCtExport = 0;
+      if(TimeCurrent() - lastCtExport >= 3600)
+        {
+         lastCtExport = TimeCurrent();
+         ExportLive();
+        }
+      return;
+     }
    ProcessAll();
    //--- 実運用：1分ごとに状態を保存し、1時間ごとに取引の記録を書き出す
    static datetime lastSave = 0, lastExport = 0;
