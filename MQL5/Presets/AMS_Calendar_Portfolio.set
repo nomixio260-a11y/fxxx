@@ -7,7 +7,7 @@
 ;  A1 EURUSD sell 11:00-12:59 London time, every weekday   C7 USDJPY buy 17:00-19:00 (Tokyo) on the last weekday of the month
 ;  C6 GBPJPY sell 17:00-18:00 (Tokyo) on the first 2 weekdays   P8 USDJPY buy 8:00-9:55 (Tokyo) on gotobi days
 ; Rules whose last 100 virtual trades have PF < 0.9 are paused automatically (after 60 trades)
-; Full compounding (no monthly lock); risk is halved while equity is >15% below its peak; large lots are split into several orders, capped at 30 lots per trade
+; Full compounding (no monthly lock); positions sized so the margin level stays >= 110% even if every stop is hit (chapter 75); risk is halved while equity is >15% below its peak; large lots are split into several orders, capped at 30 lots per trade
 InpEntryMode=6
 InpSymbols=USDJPY,EURJPY,GBPJPY,EURUSD
 InpTimeframe=5
@@ -23,7 +23,7 @@ InpAdaptMinTrades=60
 InpAdaptMinPF=0.9
 InpRiskPercent=5.0
 InpMaxMarginUsePct=90.0
-InpMinLevelAfterSL=120.0
+InpMinLevelAfterSL=110.0
 InpMaxPositions=6
 InpMaxPerSymbol=1
 InpBETriggerATR=0.0

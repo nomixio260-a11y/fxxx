@@ -1,4 +1,4 @@
-; AdaptiveMultiStrategyEA - calendar-rule portfolio, larger positions (margin level after all stops >= 110% instead of 120%; chapter 75), attach to a USDJPY M5 chart
+; AdaptiveMultiStrategyEA - previous recommended set (margin level after all stops >= 120%; until 2026-11-18, chapter 75), attach to a USDJPY M5 chart
 ; Ten time-of-day rules from different flows (Tokyo fix, month start/end, London midday); A1 at 1.25x (up to the margin cap), all others at normal risk (2026-11-18: best over all periods, chapters 62, 67 and 68):
 ;  G3F USDJPY sell 9:55 on gotobi days unless USDJPY fell 9:25-9:55; at 10:15 hold to 12:00 only if >= 3 pips ahead, else close
 ;  P2 EURJPY buy 9:25-9:55 on gotobi days
@@ -23,7 +23,7 @@ InpAdaptMinTrades=60
 InpAdaptMinPF=0.9
 InpRiskPercent=5.0
 InpMaxMarginUsePct=90.0
-InpMinLevelAfterSL=110.0
+InpMinLevelAfterSL=120.0
 InpMaxPositions=6
 InpMaxPerSymbol=1
 InpBETriggerATR=0.0
