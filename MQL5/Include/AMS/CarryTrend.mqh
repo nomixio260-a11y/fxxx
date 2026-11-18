@@ -17,6 +17,22 @@
 
 #define CT_DAYS 120   // 値動きの大きさ・相関に使う日数（日足の本数）
 
+//--- テスターでは、スワップの値が今のもので固定されるため、過去の判断に未来の金利差を使ってしまう。
+//    それを避けるため、テスターでは年ごとの政策金利（年平均の目安、tools/research/multiday_scan.py と同じ）で判断する。
+//    実運用では、口座の実際のスワップを使う。
+string CT_CCY[8] = {"JPY", "USD", "EUR", "GBP", "AUD", "NZD", "CAD", "CHF"};
+double CT_RATE[8][12] =   // 2015〜2026年
+  {
+     {-0.0, -0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -0.1, -0.1, 0.1, 0.5, 0.75},
+     {0.15, 0.4, 1.0, 1.8, 2.2, 0.4, 0.1, 1.7, 5.0, 5.1, 4.2, 3.6},
+     {-0.2, -0.35, -0.4, -0.4, -0.45, -0.5, -0.5, 0.3, 3.3, 3.6, 2.2, 2.0},
+     {0.5, 0.4, 0.3, 0.6, 0.75, 0.2, 0.1, 1.5, 4.7, 5.0, 4.2, 3.8},
+     {2.1, 1.7, 1.5, 1.5, 1.0, 0.3, 0.1, 1.5, 3.9, 4.35, 3.9, 3.6},
+     {3.0, 2.1, 1.75, 1.75, 1.3, 0.3, 0.4, 2.5, 5.4, 5.2, 3.5, 2.5},
+     {0.6, 0.5, 0.7, 1.5, 1.75, 0.5, 0.25, 2.0, 4.8, 4.5, 2.8, 2.25},
+     {-0.75, -0.75, -0.75, -0.75, -0.75, -0.75, -0.75, -0.1, 1.5, 1.3, 0.3, 0.0}
+  };
+
 class CCarryTrend
   {
 private:
@@ -41,6 +57,8 @@ private:
    bool              DailyReturns(const string sym, double &r[]);
    double            Std(const double &x[], const int from, const int count);
    double            SwapAnnualPct(const string sym, const bool isLong);
+   double            TesterCarryPct(const string sym, const bool isLong);
+   double            CarryPct(const string sym, const bool isLong);
    double            NotionalPerLot(const string sym);
    double            CurrentLots(const string sym, int &dir);
    void              CloseSymbol(const string sym, const string why);
@@ -176,6 +194,39 @@ double CCarryTrend::SwapAnnualPct(const string sym, const bool isLong)
    else
       return(0.0);
    return(perDay * 365.0 / notional * 100.0);
+  }
+
+//+------------------------------------------------------------------+
+//| テスター用：年ごとの政策金利の差から、受け取れる金利差（年率 %、業者の上乗せ 年1% を引く） |
+//+------------------------------------------------------------------+
+double CCarryTrend::TesterCarryPct(const string sym, const bool isLong)
+  {
+   const string b = StringSubstr(sym, 0, 3), q = StringSubstr(sym, 3, 3);
+   int ib = -1, iq = -1;
+   for(int k = 0; k < 8; k++)
+     {
+      if(CT_CCY[k] == b)
+         ib = k;
+      if(CT_CCY[k] == q)
+         iq = k;
+     }
+   if(ib < 0 || iq < 0)
+      return(0.0);
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   const int y = (int)MathMax(0, MathMin(11, dt.year - 2015));
+   const double diff = CT_RATE[ib][y] - CT_RATE[iq][y];
+   return((isLong ? diff : -diff) - 1.0);
+  }
+
+//+------------------------------------------------------------------+
+//| 判断に使う金利差：実運用は口座のスワップ、テスターは年ごとの政策金利      |
+//+------------------------------------------------------------------+
+double CCarryTrend::CarryPct(const string sym, const bool isLong)
+  {
+   if(MQLInfoInteger(MQL_TESTER))
+      return(TesterCarryPct(sym, isLong));
+   return(SwapAnnualPct(sym, isLong));
   }
 
 //+------------------------------------------------------------------+
@@ -320,8 +371,8 @@ bool CCarryTrend::Rebalance(void)
       for(int k = CT_DAYS - m_trendDays; k < CT_DAYS; k++)
          g *= (1.0 + r[k]);
       const int trend = (g > 1.0) ? 1 : ((g < 1.0) ? -1 : 0);
-      const double cL = SwapAnnualPct(m_sym[i], true);
-      const double cS = SwapAnnualPct(m_sym[i], false);
+      const double cL = CarryPct(m_sym[i], true);
+      const double cS = CarryPct(m_sym[i], false);
       int d = 0;
       double carry = 0.0;
       if(cL >= m_minCarry && cL >= cS)
