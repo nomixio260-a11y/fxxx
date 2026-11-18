@@ -8,7 +8,7 @@
 ;  C6 GBPJPY sell 17:00-18:00 (Tokyo) on the first 2 weekdays   P8 USDJPY buy 8:00-9:55 (Tokyo) on gotobi days
 ;  C4 and C6 (GBPJPY) accept spreads up to 3 pips (others 1.5), chapter 76
 ; Rules whose last 100 virtual trades have PF < 0.9 are paused automatically (after 60 trades)
-; Full compounding (no monthly lock); positions sized so the margin level stays >= 110% even if every stop is hit (chapter 75); risk is halved while equity is >15% below its peak; large lots are split into several orders, capped at 30 lots per trade
+; Full compounding (no monthly lock); positions sized so the margin level stays >= 110% even if every stop is hit (chapter 75); risk is halved while equity is >25% below its peak (chapter 77); large lots are split into several orders, capped at 30 lots per trade
 InpEntryMode=6
 InpSymbols=USDJPY,EURJPY,GBPJPY,EURUSD
 InpTimeframe=5
@@ -31,7 +31,7 @@ InpBETriggerATR=0.0
 InpTrailDistATR=0.0
 InpTPATR=0.0
 InpMaxDDStopPct=0.0
-InpDDRiskCutPct=15.0
+InpDDRiskCutPct=25.0
 InpDDRiskMul=0.5
 InpSplitOrders=true
 InpMaxLotsPerSymbol=30.0
