@@ -15,24 +15,25 @@ $outDir = Join-Path $repo 'reports\live'
 New-Item -ItemType Directory -Force -Path "$dir\MQL5\Presets", $common, $outDir | Out-Null
 Copy-Item "$repo\MQL5\Presets\*.set" "$dir\MQL5\Presets\" -Force
 
-# 取引の時間帯に入れ替わりの切れ目が来ないように、終わる時刻を決める（UTC）。
-#   東京の朝（日本時間 8:00〜12:10 = UTC 23:00〜3:10）と、C6・C7・A1・C4（日本時間 17:00〜19:00、ロンドン 11:00〜13:00、日本時間 22:00〜24:00 = UTC 8:00〜15:10）
+# 終わる時刻を決める（UTC、tools/ci/schedule.ps1）。
+#   取引の時間帯の途中で回を入れ替えない。UTC 4:00 ごろにサーバーごと止まる問題を避けるため、東京の朝の回は 3:35 までに終えて保存し、
+#   UTC 3:10〜4:20 に始まった回は 4:20 まで MT5 を起動せずに待つ。計算に失敗したときは、決めた分数だけ動かす。
+try {
+  . (Join-Path $PSScriptRoot 'schedule.ps1')
+  $sch = Get-LiveSchedule (Get-Date).ToUniversalTime() $runMin
+} catch {
+  Write-Host "注意：終わる時刻の計算に失敗したため、$runMin 分で終えます（$($_.Exception.Message)）"
+  $now = (Get-Date).ToUniversalTime()
+  $sch = [pscustomobject]@{ SleepUntil = $null; Start = $now; End = $now.AddMinutes($runMin); Note = 'fallback' }
+}
+if ($sch.SleepUntil) {
+  Write-Host "UTC 4:00 ごろはサーバーが止まることがあるため、$($sch.SleepUntil.ToString('HH:mm')) UTC まで MT5 を起動せずに待ちます"
+  $wait = ($sch.SleepUntil - (Get-Date).ToUniversalTime()).TotalSeconds
+  if ($wait -gt 0) { Start-Sleep -Seconds ([int][math]::Ceiling($wait)) }
+}
 $start = (Get-Date).ToUniversalTime()
-$end   = $start.AddMinutes($runMin)
-$windows = @(@(23, 0, 23, 59), @(0, 0, 3, 10), @(8, 0, 15, 10))
-function In-Window([datetime]$t) {
-  foreach ($w in $windows) {
-    $ws = $t.Date.AddHours($w[0]).AddMinutes($w[1]); $we = $t.Date.AddHours($w[2]).AddMinutes($w[3])
-    if ($t -ge $ws.AddMinutes(-20) -and $t -lt $we) { return $ws.AddMinutes(-20) }   # 次の回の準備（約15分）も見込む
-  }
-  return $null
-}
-$ws = In-Window $end
-if ($ws) {
-  if (($ws - $start).TotalMinutes -ge 30) { $end = $ws }                 # 時間帯の前に終える
-  else { $end = $start.AddMinutes(350) }                                 # 時間帯をまたいで最後まで動かす
-}
-Write-Host "開始 $($start.ToString('yyyy-MM-dd HH:mm')) UTC → 終了予定 $($end.ToString('yyyy-MM-dd HH:mm')) UTC（プリセット $preset）"
+$end   = $sch.End
+Write-Host "開始 $($start.ToString('yyyy-MM-dd HH:mm')) UTC → 終了予定 $($end.ToString('yyyy-MM-dd HH:mm')) UTC（$($sch.Note)、プリセット $preset）"
 "LIVE_END_UTC=$($end.ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
 $ini = @"

@@ -106,6 +106,10 @@ jobs:
         shell: pwsh
         run: ./tools/ci/test_lognew.ps1
 
+      - name: Self-test live schedule
+        shell: pwsh
+        run: ./tools/ci/test_schedule.ps1
+
       - name: Install MetaTrader 5
         shell: pwsh
         run: ./tools/ci/install_mt5.ps1
