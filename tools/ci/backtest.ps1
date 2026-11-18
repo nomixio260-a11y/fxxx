@@ -193,6 +193,11 @@ if (Test-Path "$out\tester_last.log") {
   # 見送りの理由（最初の40件）
   $skip = @($tl | Where-Object { $_ -match '\[AMS\] 見送り' })
   $lines += "SKIPS total=$($skip.Count)"
+  # 見送りの理由を、ルールごとに数える（全件。理由の細かい数字は除く）
+  $lines += "SKIP_REASONS"
+  $lines += @($skip | ForEach-Object {
+      if ($_ -match '\[AMS\] 見送り \S+ \[([^\]]*)\] 理由=([^（(]*)') { "$($matches[1]) $($matches[2].Trim())" }
+    } | Group-Object | Sort-Object Count -Descending | ForEach-Object { "  $($_.Count) $($_.Name)" })
   $lines += ($skip | Select-Object -First 40 | ForEach-Object {
     $x = $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 '
     if ($x.Length -gt 150) { $x.Substring(0, 150) } else { $x }
