@@ -1,23 +1,13 @@
-; AdaptiveMultiStrategyEA - calendar-rule portfolio (high risk), attach to a USDJPY M5 chart
-; Ten time-of-day rules from different flows (Tokyo fix, month start/end, London midday); A1 at 1.25x (up to the margin cap), all others at normal risk (2026-11-18: best over all periods, chapters 62, 67 and 68):
-;  G3F USDJPY sell 9:55 on gotobi days unless USDJPY fell 9:25-9:55; at 10:15 hold to 12:00 only if >= 3 pips ahead, else close
-;  P2 EURJPY buy 9:25-9:55 on gotobi days
-;  P4 EURJPY buy 9:25-9:55 on Fridays   Q2 EURJPY sell 9:55-12:00 on gotobi days only after a strong 9:25-9:55 rise
-;  C3 EURJPY sell 10:00-11:00 on month-end       C4 GBPJPY sell 22:00-24:00 (Tokyo) on the first 2 weekdays
-;  A1 EURUSD sell 11:00-12:59 London time, every weekday   C7 USDJPY buy 17:00-19:00 (Tokyo) on the last weekday of the month
-;  C6 GBPJPY sell 17:00-18:00 (Tokyo) on the first 2 weekdays   P8 USDJPY buy 8:00-9:55 (Tokyo) on gotobi days
-;  C4 and C6 (GBPJPY) accept spreads up to 3 pips (others 1.5), chapter 76
-;  P8 stop loss 15 pips (exit early on gotobi mornings without pre-fix dollar buying), chapter 78
-;  When G3F or P8 hits the 30-lot cap (balance above about 20 million yen), the part cut off is traded in EURJPY (G3E, P8E), chapter 78
-; Rules whose last 100 virtual trades have PF < 0.9 are paused automatically (after 60 trades)
-; Full compounding (no monthly lock); positions sized so the margin level stays >= 110% even if every stop is hit (chapter 75); risk is halved while equity is >25% below its peak (chapter 77); large lots are split into several orders, capped at 30 lots per trade
+; AdaptiveMultiStrategyEA - recommended set (2026-11-18): rules based on specific days (gotobi, month-end/start, weekday) are stopped by the user's instruction
+; Only A1 remains: EURUSD sell 11:00-12:59 London time on every weekday (a daily time-of-day pattern before the ECB reference rate), at 1.25x risk
+; Attach to a USDJPY M5 chart (the EA trades EURUSD from it)
 InpEntryMode=6
-InpSymbols=USDJPY,EURJPY,GBPJPY,EURUSD
+InpSymbols=EURUSD
 InpTimeframe=5
-InpCalendarRules=G3F:USDJPY,TKY,0955,125,SELL,GOTOBI,30,PRE30:-0.07,CUT20:3/P2:EURJPY,TKY,0925,30,BUY,GOTOBI,20/P4:EURJPY,TKY,0925,30,BUY,FRI,20
-InpCalendarRules2=Q2:EURJPY,TKY,0955,125,SELL,GOTOBI,25,PRE30:0.33/C3:EURJPY,TKY,1000,60,SELL,MONTHEND,25/C4:GBPJPY,TKY,2200,120,SELL,MONTHSTART,40,SPR:3
-InpCalendarRules3=A1:EURUSD,LDN,1100,120,SELL,ALL,30,EXS:60/C7:USDJPY,TKY,1700,120,BUY,MONTHEND,30/C6:GBPJPY,TKY,1700,60,SELL,MONTHSTART,40,SPR:3/P8:USDJPY,TKY,0800,115,BUY,GOTOBI,15
-InpCalendarRules4=G3E:EURJPY,TKY,0955,125,SELL,GOTOBI,30,PRE30:-0.07,CUT20:3,OVF:G3F/P8E:EURJPY,TKY,0800,115,BUY,GOTOBI,15,OVF:P8
+InpCalendarRules=A1:EURUSD,LDN,1100,120,SELL,ALL,30,EXS:60
+InpCalendarRules2=
+InpCalendarRules3=
+InpCalendarRules4=
 InpRuleRiskMul=A1:1.25
 InpEntryDelaySec=0
 InpMonthTargetPct=0.0
