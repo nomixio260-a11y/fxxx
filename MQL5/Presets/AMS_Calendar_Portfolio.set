@@ -1,14 +1,13 @@
-; AdaptiveMultiStrategyEA - recommended set (2026-11-18): rules based on specific days (gotobi, month-end/start, weekday) are stopped by the user's instruction
-; Only A1 remains: EURUSD sell 11:00-12:59 London time on every weekday (a daily time-of-day pattern before the ECB reference rate), at 1.25x risk
-; Attach to a USDJPY M5 chart (the EA trades EURUSD from it)
+; AdaptiveMultiStrategyEA - NO TRADING (2026-11-18): by the user's instruction, rules based on specific days and on time-of-day habits (including A1) are all stopped.
+; A new method based on price patterns, analysis and prediction models is being researched (chapter 81). This set has no rules, so the EA does not trade.
 InpEntryMode=6
 InpSymbols=EURUSD
 InpTimeframe=5
-InpCalendarRules=A1:EURUSD,LDN,1100,120,SELL,ALL,30,EXS:60
+InpCalendarRules=
 InpCalendarRules2=
 InpCalendarRules3=
 InpCalendarRules4=
-InpRuleRiskMul=A1:1.25
+InpRuleRiskMul=
 InpEntryDelaySec=0
 InpMonthTargetPct=0.0
 InpMonthLockMul=0.5
