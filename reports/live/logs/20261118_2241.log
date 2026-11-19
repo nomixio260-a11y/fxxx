@@ -1,0 +1,4 @@
+FO	0	22:41:56.862	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURUSD 取引の上限：1回の注文 10.00 lot、建玉の合計 300.00 lot（0 = 上限なし）、最小 0.01 lot、刻み 0.01 lot
+QK	0	22:41:58.873	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] EURUSD に当てはまる時刻ルールがないため、この銘柄は取引しません
+FO	0	22:41:58.873	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 銘柄 EURUSD の初期化に失敗したため除外します
+CE	0	22:41:58.873	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 取引できる銘柄がありません
