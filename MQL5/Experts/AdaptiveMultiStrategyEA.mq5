@@ -184,6 +184,7 @@ input int              InpCtRebalanceDays   = 7;           // 入れ替えの間
 input int              InpCtHour            = 3;           // 入れ替えはサーバー時刻のこの時以降（日付の変わり目のスプレッド拡大を避けるため）
 input double           InpCtBand            = 0.25;        // 今の建玉と目標の差がこの割合未満なら入れ替えない（無駄な売買を減らす）
 input double           InpCtSLVolMul        = 6.0;         // 急変に備えた損切り：日々の値動きの何倍か（0で置かない）
+input bool             InpCtDailyExit       = true;        // 毎日の手じまい：持っているペアのトレンドが逆・急変なら、次の入れ替えを待たずに手じまう（86章）
 
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
@@ -1222,6 +1223,7 @@ int OnInit(void)
          Print("[AMS] 金利差＋トレンド：取引できる銘柄がありません");
          return(INIT_FAILED);
         }
+      g_carry.SetDailyExit(InpCtDailyExit);
       g_carryMode  = true;
       g_peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
       g_halted     = false;

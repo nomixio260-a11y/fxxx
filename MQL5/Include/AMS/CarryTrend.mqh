@@ -55,6 +55,8 @@ private:
    datetime          m_initAt;        // 起動した時刻（実運用：銘柄の情報がそろうまで、5分は入れ替えない）
    string            m_gvKey;
    string            m_stateFile;    // 前回の入れ替えの時刻（共通フォルダ。デモ口座の回をまたいで引き継ぐ）
+   bool              m_dailyExit;     // 毎日の手じまい（トレンドが逆・急変のペアは、次の入れ替えを待たずに手じまう。86章）
+   datetime          m_lastExitDay;
 
    bool              DailyReturns(const string sym, double &r[]);
    double            Std(const double &x[], const int from, const int count);
@@ -67,9 +69,11 @@ private:
    void              OpenLots(const string sym, const int dir, double lots, const double vol);
    void              ReduceLots(const string sym, double lots);
    double            NormalizeLots(const string sym, const double lots);
+   void              DailyExits(void);
 
 public:
-                     CCarryTrend(void) : m_trade(NULL), m_magic(0), m_n(0), m_lastRebalance(0), m_initAt(0) {}
+                     CCarryTrend(void) : m_trade(NULL), m_magic(0), m_n(0), m_lastRebalance(0), m_initAt(0), m_dailyExit(false), m_lastExitDay(0) {}
+   void              SetDailyExit(const bool on) { m_dailyExit = on; }
    bool              Init(CTrade *trade, const ulong magic, const string &syms[], const int trendDays, const double minCarry,
                           const int topK, const double crashMul, const double volTarget, const double maxLev,
                           const double maxMarginPct, const int rbDays, const int hour, const double band,
@@ -546,6 +550,33 @@ bool CCarryTrend::Rebalance(void)
   }
 
 //+------------------------------------------------------------------+
+//| 毎日の手じまい：持っているペアのトレンドが逆向きになった、または急変した   |
+//| ら、次の入れ替えを待たずに手じまう（その日までの日足だけで判断）          |
+//+------------------------------------------------------------------+
+void CCarryTrend::DailyExits(void)
+  {
+   for(int i = 0; i < m_n; i++)
+     {
+      int d = 0;
+      if(CurrentLots(m_sym[i], d) <= 0.0)
+         continue;
+      double r[];
+      if(!DailyReturns(m_sym[i], r))
+         continue;
+      double g = 1.0;
+      for(int k = CT_DAYS - m_trendDays; k < CT_DAYS; k++)
+         g *= (1.0 + r[k]);
+      const int trend = (g > 1.0) ? 1 : ((g < 1.0) ? -1 : 0);
+      const double v10  = Std(r, CT_DAYS - 10, 10);
+      const double v120 = Std(r, 0, CT_DAYS);
+      if(trend != d)
+         CloseSymbol(m_sym[i], "毎日の確認：トレンドが逆向きになった");
+      else if(m_crashMul > 0.0 && v10 > m_crashMul * v120)
+         CloseSymbol(m_sym[i], "毎日の確認：値動きが急に大きくなった");
+     }
+  }
+
+//+------------------------------------------------------------------+
 //| 毎ティック：入れ替えの時期なら入れ替える                               |
 //+------------------------------------------------------------------+
 void CCarryTrend::OnTick(void)
@@ -558,6 +589,12 @@ void CCarryTrend::OnTick(void)
    if(!MQLInfoInteger(MQL_TESTER) && (long)now - (long)m_initAt < 300)
       return;
    const datetime today = (datetime)((long)now - (long)now % 86400);
+   //--- 毎日の手じまい（1日1回。新しく持つ・増やすのは週1回の入れ替えだけ）
+   if(m_dailyExit && today != m_lastExitDay)
+     {
+      DailyExits();
+      m_lastExitDay = today;
+     }
    if(m_lastRebalance > 0 && (long)today - (long)m_lastRebalance < (long)m_rbDays * 86400)
       return;
    if(!Rebalance())
