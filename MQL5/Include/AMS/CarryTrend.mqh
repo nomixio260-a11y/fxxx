@@ -97,7 +97,7 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
    m_band         = band;
    m_slVolMul     = slVolMul;
    m_gvKey        = gvKey;
-   m_stateFile    = StringFormat("AMS_ct_state_%I64u.txt", magic);
+   m_stateFile    = StringFormat("AMS_ct_state2_%I64u.txt", magic);   // 2026-11-20：判断の不具合を直したため、記録を新しくした
    m_n            = ArraySize(syms);
    ArrayResize(m_sym, m_n);
    for(int i = 0; i < m_n; i++)
@@ -105,9 +105,9 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
       m_sym[i] = syms[i];
       if(!SymbolSelect(m_sym[i], true))
          PrintFormat("[AMS] 金利差＋トレンド：%s を気配値表示に追加できません", m_sym[i]);
-      PrintFormat("[AMS] 金利差＋トレンド：%s スワップの方式=%d 買い %.2f%% / 売り %.2f%%（年率、口座の値から計算）",
-                  m_sym[i], (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_MODE),
-                  SwapAnnualPct(m_sym[i], true), SwapAnnualPct(m_sym[i], false));
+      PrintFormat("[AMS] 金利差＋トレンド：%s 判断に使う金利差（政策金利の表、上乗せ後）買い %.2f%% / 売り %.2f%%、口座のスワップ（方式=%d）買い %.2f / 売り %.2f",
+                  m_sym[i], TesterCarryPct(m_sym[i], true), TesterCarryPct(m_sym[i], false), (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_MODE),
+                  SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_LONG), SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_SHORT));
      }
    if(!MQLInfoInteger(MQL_TESTER))
      {
@@ -239,9 +239,17 @@ double CCarryTrend::TesterCarryPct(const string sym, const bool isLong)
 //+------------------------------------------------------------------+
 double CCarryTrend::CarryPct(const string sym, const bool isLong)
   {
+   //--- 判断は、テスターでも実運用でも、年ごとの政策金利の表で行う（バックテストと同じ動きにするため）。
+   //    口座のスワップの年率への換算は、業者の値の単位がはっきりしないため（2026年11月19日のデモ口座で、
+   //    実際の金利差の2〜3倍に出た）、判断には使わない。実運用では、その向きの口座のスワップが
+   //    プラス（受け取り）であることだけを、追加の条件にする（払いになる向きは持たない）。
+   const double t = TesterCarryPct(sym, isLong);
    if(MQLInfoInteger(MQL_TESTER))
-      return(TesterCarryPct(sym, isLong));
-   return(SwapAnnualPct(sym, isLong));
+      return(t);
+   const double sw = SymbolInfoDouble(sym, isLong ? SYMBOL_SWAP_LONG : SYMBOL_SWAP_SHORT);
+   if(sw <= 0.0)
+      return(MathMin(t, -1.0));
+   return(t);
   }
 
 //+------------------------------------------------------------------+
