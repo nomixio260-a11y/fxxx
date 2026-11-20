@@ -1,0 +1,20 @@
+LG	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：USDJPY スワップの方式=1 買い 2.31% / 売り -5.75%（年率、口座の値から計算）
+EP	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：EURUSD スワップの方式=1 買い -1.83% / 売り 1.11%（年率、口座の値から計算）
+PQ	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：EURJPY スワップの方式=1 買い 0.37% / 売り -2.45%（年率、口座の値から計算）
+CS	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：GBPJPY スワップの方式=1 買い 1.16% / 売り -4.67%（年率、口座の値から計算）
+LP	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：AUDJPY スワップの方式=1 買い 0.00% / 売り 0.00%（年率、口座の値から計算）
+NO	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：GBPUSD スワップの方式=1 買い -0.17% / 売り -0.22%（年率、口座の値から計算）
+KN	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：AUDCAD スワップの方式=1 買い 0.00% / 売り 0.00%（年率、口座の値から計算）
+IN	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：AUDNZD スワップの方式=1 買い 2.01% / 売り -2.37%（年率、口座の値から計算）
+DO	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：AUDUSD スワップの方式=1 買い 0.40% / 売り -1.38%（年率、口座の値から計算）
+JM	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：CADJPY スワップの方式=1 買い 0.00% / 売り 0.00%（年率、口座の値から計算）
+DH	0	21:47:28.667	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：CHFJPY スワップの方式=1 買い -1.58% / 売り 0.95%（年率、口座の値から計算）
+PH	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：EURGBP スワップの方式=1 買い -2.10% / 売り 0.87%（年率、口座の値から計算）
+RI	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：NZDCAD スワップの方式=1 買い 0.00% / 売り 0.00%（年率、口座の値から計算）
+LJ	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：NZDJPY スワップの方式=1 買い 0.90% / 売り -2.27%（年率、口座の値から計算）
+IE	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：NZDUSD スワップの方式=1 買い -1.71% / 売り 0.90%（年率、口座の値から計算）
+QE	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：USDCAD スワップの方式=1 買い 4.30% / 売り -4.89%（年率、口座の値から計算）
+HF	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：USDCHF スワップの方式=1 買い 3.10% / 売り -5.21%（年率、口座の値から計算）
+QD	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：前回の入れ替え 2026.11.19
+CN	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] 金利差＋トレンド：17 ペア、トレンド 60 日、金利差 1.0% 以上、上位 5、急変 2.0 倍、目標の年率ボラティリティ 20.0%、建玉の合計の上限 10.0 倍、入れ替え 7 日ごと（サーバー時刻 3 時以降）
+NM	0	21:47:28.668	AdaptiveMultiStrategyEA (USDJPY,M5)	[AMS] エントリーの方式: ENTRY_CARRY
