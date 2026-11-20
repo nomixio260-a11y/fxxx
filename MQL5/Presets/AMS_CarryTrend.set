@@ -18,4 +18,4 @@ InpCtSLVolMul=6.0
 InpMaxMarginUsePct=90.0
 InpSplitOrders=true
 InpAsyncOrders=false
-InpCtDailyExit=true
+InpCtDailyExit=false
