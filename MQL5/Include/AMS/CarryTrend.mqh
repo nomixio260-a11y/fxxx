@@ -52,6 +52,7 @@ private:
    double            m_band;
    double            m_slVolMul;
    datetime          m_lastRebalance;
+   datetime          m_initAt;        // 起動した時刻（実運用：銘柄の情報がそろうまで、5分は入れ替えない）
    string            m_gvKey;
    string            m_stateFile;    // 前回の入れ替えの時刻（共通フォルダ。デモ口座の回をまたいで引き継ぐ）
 
@@ -68,7 +69,7 @@ private:
    double            NormalizeLots(const string sym, const double lots);
 
 public:
-                     CCarryTrend(void) : m_trade(NULL), m_magic(0), m_n(0), m_lastRebalance(0) {}
+                     CCarryTrend(void) : m_trade(NULL), m_magic(0), m_n(0), m_lastRebalance(0), m_initAt(0) {}
    bool              Init(CTrade *trade, const ulong magic, const string &syms[], const int trendDays, const double minCarry,
                           const int topK, const double crashMul, const double volTarget, const double maxLev,
                           const double maxMarginPct, const int rbDays, const int hour, const double band,
@@ -97,7 +98,8 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
    m_band         = band;
    m_slVolMul     = slVolMul;
    m_gvKey        = gvKey;
-   m_stateFile    = StringFormat("AMS_ct_state2_%I64u.txt", magic);   // 2026-11-20：判断の不具合を直したため、記録を新しくした
+   m_stateFile    = StringFormat("AMS_ct_state3_%I64u.txt", magic);   // 2026-11-20：判断の不具合を直したため、記録を新しくした（2回目）
+   m_initAt       = TimeCurrent();
    m_n            = ArraySize(syms);
    ArrayResize(m_sym, m_n);
    for(int i = 0; i < m_n; i++)
@@ -246,8 +248,10 @@ double CCarryTrend::CarryPct(const string sym, const bool isLong)
    const double t = TesterCarryPct(sym, isLong);
    if(MQLInfoInteger(MQL_TESTER))
       return(t);
+   //--- 0 は「まだ値を受け取っていない」ことがある（2026-11-20、起動直後に円のペアがすべて 0 だった）ので、
+   //    はっきりマイナス（払い）のときだけ外す
    const double sw = SymbolInfoDouble(sym, isLong ? SYMBOL_SWAP_LONG : SYMBOL_SWAP_SHORT);
-   if(sw <= 0.0)
+   if(sw < 0.0)
       return(MathMin(t, -1.0));
    return(t);
   }
@@ -550,6 +554,8 @@ void CCarryTrend::OnTick(void)
    MqlDateTime dt;
    TimeToStruct(now, dt);
    if(dt.day_of_week == 0 || dt.day_of_week == 6 || dt.hour < m_hour)
+      return;
+   if(!MQLInfoInteger(MQL_TESTER) && (long)now - (long)m_initAt < 300)
       return;
    const datetime today = (datetime)((long)now - (long)now % 86400);
    if(m_lastRebalance > 0 && (long)today - (long)m_lastRebalance < (long)m_rbDays * 86400)
