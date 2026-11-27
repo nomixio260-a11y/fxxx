@@ -19,7 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import index_reversion as IR  # noqa: E402
 import index_reversion_cfd as IC  # noqa: E402
 
-SYMS = {"US500_HD": ("SPXUSD", 1.0, -3.0), "US100_HD": ("NSXUSD", 2.5, -3.8)}       # histdata の銘柄, スプレッド, 買いの持ち越し（年 %）
+ALL = {"US500_HD": ("SPXUSD", 1.0, -3.0), "US100_HD": ("NSXUSD", 2.5, -3.8), "XAU_HD": ("XAUUSD", 0.5, -4.4)}   # histdata の銘柄, スプレッド, 買いの持ち越し（年 %）
+SYMS = {k: ALL[k] for k in ("US500_HD", "US100_HD")}
+TREND_DAYS = 7
 CONTRACT, STEP, BAND, DELAY_MIN = 100.0, 0.01, 0.25, 5
 
 
@@ -54,26 +56,34 @@ def signals(d):
 
 
 def main():
+    """引数：開始日 終了日 初期資金 戻りの1つ分の値動き% 順張りの1銘柄の値動き% 銘柄（カンマ区切り）"""
+    global SYMS
     a = sys.argv[1:]
     start, end = (a[0], a[1]) if len(a) >= 2 else ("2011-09-01", "2026-10-30")
     deposit = float(a[2]) if len(a) >= 3 else 1e7
     unit = float(a[3]) if len(a) >= 4 else 1.667
-    D, ST, VOL = {}, {}, {}
+    tunit = float(a[4]) if len(a) >= 5 else 0.0
+    if len(a) >= 6:
+        SYMS = {k: ALL[k] for k in a[5].split(",")}
+    D, ST, CHG, VOL, ABOVE, OK = {}, {}, {}, {}, {}, {}
     for s, (pair, _, _) in SYMS.items():
         d = prepare(pair)
         D[s] = d
         r = signals(d)
-        ST[s] = (r["R2<10"] + r["D7"] + r["IBS"])
-        ST[s + "_chg"] = (r["R2<10"].diff().abs() + r["D7"].diff().abs() + r["IBS"].diff().abs()).fillna(0) > 0
+        ST[s] = (r["R2<10"] + r["D7"] + r["IBS"]) if unit > 0 else r["IBS"] * 0.0
         ret = d["close"].pct_change()
         VOL[s] = (ret.rolling(60).std() * np.sqrt(252)).clip(lower=0.025)
-        n200 = d["close"].rolling(215).count() >= 215          # EA は確定した日足が215本以上になってから判定する
-        ST[s] = ST[s].where(n200, 0.0)
+        ABOVE[s] = (d["close"] > d["close"].rolling(200).mean()).astype(float)
+        OK[s] = d["close"].rolling(215).count() >= 215          # EA は、確定した日足が215本以上になってから判定する
     days = sorted(set().union(*[set(D[s].index) for s in SYMS]))
     days = [x for x in days if pd.Timestamp(start) <= x <= pd.Timestamp(end)]
     cash = deposit
     units = {s: 0.0 for s in SYMS}
     last_close = {s: np.nan for s in SYMS}
+    prev_n = {s: 0.0 for s in SYMS}
+    trend = {s: 0.0 for s in SYMS}
+    trend_check = {s: None for s in SYMS}
+    started = {s: False for s in SYMS}
     trades = 0
     eq_days, eq_vals = [], []
     prev_day = None
@@ -93,26 +103,33 @@ def main():
             if i == 0 or np.isnan(row["px"]):
                 continue
             prev = d.index[i - 1]                                  # 確定した最後の日足
-            n = ST[s].loc[prev]
-            chg = bool(ST[s + "_chg"].loc[prev]) if i >= 2 else True
-            vol = VOL[s].loc[prev]
-            if np.isnan(vol):
+            if not OK[s].loc[prev] or np.isnan(VOL[s].loc[prev]):
                 continue
+            n = ST[s].loc[prev]
+            chg = (n != prev_n[s]) or not started[s]
+            # 同じ数でも、中身が入れ替わった日（あるルールが出て、別のルールが入った日）は、EA も建玉を直す。ここでは数の変化だけを見る
+            prev_n[s] = n
+            if tunit > 0 and (trend_check[s] is None or (prev - trend_check[s]).days >= TREND_DAYS):
+                trend_check[s] = prev
+                st = ABOVE[s].loc[prev]
+                if st != trend[s]:
+                    trend[s] = st
+                    chg = True
+            started[s] = True
+            vol = VOL[s].loc[prev]
             bid = row["px"]
-            # 口座の有効証拠金（すべての建玉を、今の値段で評価）
             eq = cash
             for q in SYMS:
                 if units[q] > 0:
                     pq = D[q].loc[day, "px"] if day in D[q].index and not np.isnan(D[q].loc[day, "px"]) else last_close[q]
                     eq += units[q] * pq
-            tgt = eq * n * unit / 100.0 / vol
+            tgt = eq * (n * unit + trend[s] * tunit) / 100.0 / vol
             lots = np.floor(tgt / (bid * CONTRACT) / STEP + 1e-9) * STEP
             cur = units[s] / CONTRACT
             if lots <= 0:
                 if cur > 0:
                     cash += units[s] * bid
                     units[s] = 0.0
-                    trades += 1
             elif chg or abs(cur - lots) > BAND * max(cur, lots):
                 if lots > cur:
                     cash -= (lots - cur) * CONTRACT * (bid + spread)
@@ -132,8 +149,10 @@ def main():
     y = eq.resample("YE").last()
     yret = (y / y.shift(1).fillna(deposit) - 1) * 100
     dd = (eq / eq.cummax() - 1).min() * 100
-    print(f"期間 {eq.index[0].date()}〜{eq.index[-1].date()}、初期資金 {deposit:,.0f} 円、ルール1つ分の値動き {unit}%")
-    print(f"最終の有効証拠金 {eq.iloc[-1]:,.0f} 円（損益 {eq.iloc[-1] - deposit:+,.0f} 円、{(eq.iloc[-1] / deposit - 1) * 100:+.1f}%）、買いの注文 {trades} 回、最大の下落（日次の終値）{dd:.1f}%")
+    dr = eq.pct_change().dropna()
+    print(f"銘柄 {','.join(SYMS)}、期間 {eq.index[0].date()}〜{eq.index[-1].date()}、初期資金 {deposit:,.0f} 円、戻り {unit}%・順張り {tunit}%")
+    print(f"最終の有効証拠金 {eq.iloc[-1]:,.0f} 円（損益 {eq.iloc[-1] - deposit:+,.0f} 円、{(eq.iloc[-1] / deposit - 1) * 100:+.1f}%）、買いの注文 {trades} 回、"
+          f"最大の下落（日次の終値）{dd:.1f}%、年率シャープ {dr.mean() / dr.std() * np.sqrt(252):+.2f}、値動き 年{dr.std() * np.sqrt(252) * 100:.1f}%")
     print("年ごと（%）：" + "、".join(f"{k.year}年 {v:+.1f}" for k, v in yret.items()))
     print("MONTHLY " + ",".join(f"{k.strftime('%Y-%m')}:{v:.2f}" for k, v in mret.items()))
 
