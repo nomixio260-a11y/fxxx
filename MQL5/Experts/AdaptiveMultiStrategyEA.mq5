@@ -206,6 +206,12 @@ input double           InpIxVixHighMult     = 1.5;         // VIX が過去の�
 input int              InpIxFlatMinutes     = 0;           // 持ち越しのコストを減らす：取引の区切りのこの分数前に手じまい、次の日足の判定のあとに持ち直す（0で使わない。99章）
 input double           InpIxFlatEdgeBp      = 0.0;         // 上の手じまいは、その夜のスワップがスプレッドよりこれだけ（値段の1万分の1単位）以上高いときだけ行う
 input string           InpIxRuleWeights     = "1,2,4";     // 戻り：ルールが 1つ・2つ・3つ 出ているときの建玉の単位（1,2,4 = 3つそろったときに厚くする。1,2,3 = ルールの数に比例。99章）
+input bool             InpIxJointRound      = true;        // 建玉の丸め方：true=ルールが出ている銘柄をまとめて、目標とのずれが最小になるロットの組み合わせを選ぶ（小さい口座向け。100章）／false=銘柄ごとに切り捨て
+input double           InpIxJointEps        = 0.25;        // まとめて丸めるとき、全体の値動きが目標を超えてよい割合（0.25 = 目標の 1.25 倍まで）
+input bool             InpIxWarmStart       = true;        // 起動時に、日足の履歴からルールの状態を復元する（状態のファイルがなくても同じ状態に戻る。100章）
+input int              InpIxRegimeDays      = 750;         // 前提の監視：過去この日数の値動きが「続きやすい」と判定されたら IBS を止める（0で使わない。100章）
+input double           InpIxRegimeThr       = 0.02;        // 前提の監視のしきい値（MAC5 の平均がこの値を超えたら止める）
+input bool             InpIxDryRun          = false;       // 観察モード：注文を一切出さず、判定と目標の建玉だけをログに出す（実際の口座との突き合わせ用）
 input double           InpIxSoGuard         = 0.9;         // 強制ロスカットを避ける上限：すべての建玉が逆指値にかかっても証拠金維持率がロスカットの水準を下回らない大きさに抑える（余裕の係数。0で使わない。99章）
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
 input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
@@ -1335,7 +1341,8 @@ int OnInit(void)
                          InpIxTrendUnitVol, InpIxTrendCheckDays, InpIxMaxLev, InpMaxMarginUsePct, InpIxBand, InpIxSLVolMul,
                          InpIxDelayMin, InpIxMaxSpreadPct, InpIxVolModel,
                          (InpIxVixFile == "none" || InpIxVixFile == "-") ? "" : InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult,
-                         InpIxFlatMinutes, InpIxFlatEdgeBp, InpIxRuleWeights, InpIxSoGuard))
+                         InpIxFlatMinutes, InpIxFlatEdgeBp, InpIxRuleWeights, InpIxSoGuard,
+                         InpIxJointRound, InpIxJointEps, InpIxWarmStart, InpIxRegimeDays, InpIxRegimeThr, InpIxDryRun))
         {
          Print("[AMS] 指数の層：取引できる銘柄がありません");
          return(INIT_FAILED);

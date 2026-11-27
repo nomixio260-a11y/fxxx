@@ -247,14 +247,14 @@ if (Test-Path "$out\tester_last.log") {
   $tpN = @($tl | Where-Object { $_ -match 'take profit triggered' }).Count
   $eaN = @($tl | Where-Object { $_ -match '\[AMS\] 決済 #' }).Count
   $soN = @($tl | Where-Object { $_ -match 'stop out' }).Count
-  $ev  = @($tl | Where-Object { $_ -match '\[AMS\] \S+ (BUY|SELL) |stop loss triggered|take profit triggered|\[AMS\] 決済 #|週明け|エントリーの方式|DD上限|下落したため|自動調整|指数の層：\S+（|スワップの倍率|指数の層：値動きの見積もり|指数の層：その夜のスワップ|指数の層：ルールがそろった数の重み|stop out|margin call' })
+  $ev  = @($tl | Where-Object { $_ -match '\[AMS\] \S+ (BUY|SELL) |stop loss triggered|take profit triggered|\[AMS\] 決済 #|週明け|エントリーの方式|DD上限|下落したため|自動調整|指数の層：\S+（|スワップの倍率|指数の層：値動きの見積もり|指数の層：その夜のスワップ|指数の層：ルールがそろった数の重み|指数の層：建玉の丸め方|状態の復元（|stop out|margin call' })
   $lines = @("SAMPLE sl_hit=$slN tp_hit=$tpN closed_by_ea=$eaN stop_out=$soN")
   $lines += ($ev | Select-Object -First 48 | ForEach-Object {
     $x = $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 '
     if ($x.Length -gt 150) { $x.Substring(0, 150) } else { $x }
   })
   # 終わりのまとめの行（区切りの前に手じまった回数など）
-  $lines += @($tl | Where-Object { $_ -match '区切りの前に手じまった回数|強制ロスカットを避ける上限で建玉を縮めた回数' } | Select-Object -Last 2 | ForEach-Object { $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 ' })
+  $lines += @($tl | Where-Object { $_ -match '区切りの前に手じまった回数|強制ロスカットを避ける上限で建玉を縮めた回数|切り捨てより建玉が増えた回数' } | Select-Object -Last 3 | ForEach-Object { $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 ' })
   # 見送りの理由（最初の40件）
   $skip = @($tl | Where-Object { $_ -match '\[AMS\] 見送り' })
   $lines += "SKIPS total=$($skip.Count)"

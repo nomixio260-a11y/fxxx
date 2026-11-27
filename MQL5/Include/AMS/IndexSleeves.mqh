@@ -42,6 +42,19 @@
 //|      ≤ 有効証拠金 × 余裕の係数                                        |
 //| ルールがそろった数の重み（99章）：1つ・2つ・3つのときの建玉の単位を入力で   |
 //|  決める（1,2,3 = ルールの数に比例。1,2,4 = 3つそろったときに厚くする）。    |
+//|                                                                  |
+//| 100章の仕組み：                                                    |
+//|  まとめて丸める：小さい口座では、最小の取引単位のせいで目標どおりに持てない。 |
+//|   そこで、ルールが出ている銘柄をまとめて、「目標とのずれの分散」            |
+//|   (N − N*)ᵀ Σ (N − N*) が最小になるロットの組み合わせを選ぶ               |
+//|   （N = 建玉の額、N* = 目標の額、Σ = 値動きの分散・共分散）。              |
+//|   全体の値動きは、目標の (1 + ε) 倍を超えない。                           |
+//|  状態の復元：起動時に、日足の履歴からルールの状態を作り直す                 |
+//|   （状態のファイルがなくても、止まっていても、同じ状態に戻る）。             |
+//|  前提の監視：過去 W 日の MAC5（当日の値動き ×（4×前日+3×2日前+2×3日前      |
+//|   +4日前）÷（5×分散））の平均がプラス = 値動きが続きやすい相場のあいだは、    |
+//|   IBS（200日の平均の条件がないルール）を止める。                          |
+//|  観察モード：注文を一切出さず、判定と目標の建玉だけをログに出す。            |
 //+------------------------------------------------------------------+
 #ifndef AMS_INDEXSLEEVES_MQH
 #define AMS_INDEXSLEEVES_MQH
@@ -90,6 +103,24 @@ private:
    double            m_soGuard;        // 強制ロスカットを避ける上限の、余裕の係数（0 で使わない）
    double            m_dvol[];         // 銘柄ごとの、最後に計算した1日の値動きの見積もり
    double            m_tgtLots[];      // 銘柄ごとの、最後に決めた目標のロット（最小の取引単位に届かないときは 0）
+   //--- 100章
+   bool              m_joint;          // 建玉を、銘柄をまとめて丸める
+   double            m_jointEps;       // まとめて丸めるとき、全体の値動きが目標を超えてよい割合
+   bool              m_dryRun;         // 観察モード（注文を出さない）
+   bool              m_warm;           // 起動時に、日足の履歴からルールの状態を復元する
+   int               m_regDays;        // 前提の監視：過去何日の MAC5 の平均を見るか（0 で使わない）
+   double            m_regThr;         // この値を超えたら「続きやすい相場」とみなして IBS を止める
+   int               m_regOn[];        // 銘柄ごと：1 = IBS を使ってよい、0 = 止める
+   double            m_regVal[];       // 銘柄ごと：監視の値（計算できないときは EMPTY_VALUE）
+   bool              m_evOk[];         // 判定の結果（銘柄ごと）
+   bool              m_evChanged[];
+   string            m_evNote[];
+   string            m_evVix[];
+   double            m_evAnnVol[];
+   double            m_evFrac[];       // 目標の建玉の額 ÷ 有効証拠金
+   datetime          m_evalBar[];      // 判定を済ませた、作りかけの日足の時刻（まとめて丸める形）
+   datetime          m_firstEval;      // 最初の銘柄の判定が済んだ時刻
+   long              m_jointUp;        // まとめて丸めて、切り捨てより建玉が増えた回数
    long              m_soCut;          // 上の上限で建玉を縮めた回数
    int               m_delaySec;       // 新しい日足が始まってから、売買するまで待つ秒数
    double            m_maxSpreadPct;   // スプレッドがこの割合（値段に対する %）を超えているあいだは待つ
@@ -112,6 +143,13 @@ private:
    datetime          SessionEnd(const string sym, const datetime t0);
    double            SwapTonightPct(const string sym, const datetime t0);
    void              FlatBeforeRollover(const int i, const datetime now);
+   bool              Evaluate(const int i, const datetime t0);
+   void              UpdateStates(const int i, const MqlRates &rt[], const int got, const int jStart, const bool entryOnAll,
+                                  bool &changed, string &note);
+   void              Reconstruct(const int i);
+   double            RegimeValue(const string sym);
+   void              ExecuteJoint(void);
+   void              TradeTo(const int i, const double tl, const bool changed, const double equity, string &note);
    int               LoadVix(void);
    double            VixMult(const datetime barDate, string &note);
    bool              Process(const int i, const datetime t0);
@@ -127,7 +165,9 @@ public:
                           const int trendDays, const double maxLev, const double maxMarginPct, const double band,
                           const double slVolMul, const int delayMin, const double maxSpreadPct,
                           const int volModel, const string vixFile, const double vixLow, const double vixHigh,
-                          const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard);
+                          const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard,
+                          const bool jointRound, const double jointEps, const bool warmStart, const int regimeDays,
+                          const double regimeThr, const bool dryRun);
    void              OnTick(void);
    void              Summary(void);
   };
@@ -138,7 +178,9 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                          const int trendDays, const double maxLev, const double maxMarginPct, const double band,
                          const double slVolMul, const int delayMin, const double maxSpreadPct,
                          const int volModel, const string vixFile, const double vixLow, const double vixHigh,
-                         const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard)
+                         const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard,
+                         const bool jointRound, const double jointEps, const bool warmStart, const int regimeDays,
+                         const double regimeThr, const bool dryRun)
   {
    m_trade        = trade;
    m_magic        = magic;
@@ -166,6 +208,14 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_flatSkip     = 0;
    m_soGuard      = MathMax(0.0, soGuard);
    m_soCut        = 0;
+   m_joint        = jointRound;
+   m_jointEps     = MathMax(0.0, jointEps);
+   m_warm         = warmStart;
+   m_regDays      = (int)MathMax(0, regimeDays);
+   m_regThr       = regimeThr;
+   m_dryRun       = dryRun;
+   m_firstEval    = 0;
+   m_jointUp      = 0;
    //--- ルールがそろった数の重み（「1,2,4」の形。読めないときは 1,2,3 = ルールの数に比例）
    m_ruleW[0] = 0.0;
    m_ruleW[1] = 1.0;
@@ -223,11 +273,29 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    ArrayResize(m_flatDone, m_n);
    ArrayResize(m_dvol, m_n);
    ArrayResize(m_tgtLots, m_n);
+   ArrayResize(m_regOn, m_n);
+   ArrayResize(m_regVal, m_n);
+   ArrayResize(m_evOk, m_n);
+   ArrayResize(m_evChanged, m_n);
+   ArrayResize(m_evNote, m_n);
+   ArrayResize(m_evVix, m_n);
+   ArrayResize(m_evAnnVol, m_n);
+   ArrayResize(m_evFrac, m_n);
+   ArrayResize(m_evalBar, m_n);
    for(int i = 0; i < m_n; i++)
      {
       m_flatDone[i] = 0;
       m_dvol[i] = 0.0;
       m_tgtLots[i] = 0.0;
+      m_regOn[i] = 1;
+      m_regVal[i] = EMPTY_VALUE;
+      m_evOk[i] = false;
+      m_evChanged[i] = false;
+      m_evNote[i] = "";
+      m_evVix[i] = "";
+      m_evAnnVol[i] = 0.0;
+      m_evFrac[i] = 0.0;
+      m_evalBar[i] = 0;
       for(int r = 0; r < IX_NR; r++)
          m_state[i][r] = 0;
       m_lastBar[i] = 0;
@@ -285,6 +353,15 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    PrintFormat("[AMS] 指数の層：ルールがそろった数の重み 1つ %.2f・2つ %.2f・3つ %.2f、強制ロスカットを避ける上限 %s（ロスカットの水準 %.0f%%）",
                m_ruleW[1], m_ruleW[2], m_ruleW[3], m_soGuard > 0.0 ? StringFormat("あり（余裕の係数 %.2f）", m_soGuard) : "なし",
                (AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE) == ACCOUNT_STOPOUT_MODE_PERCENT) ? AccountInfoDouble(ACCOUNT_MARGIN_SO_SO) : 100.0);
+   PrintFormat("[AMS] 指数の層：建玉の丸め方 %s、状態の復元 %s、前提の監視 %s%s",
+               m_joint ? StringFormat("まとめて丸める（全体の値動きは目標の %.2f 倍まで）", 1.0 + m_jointEps) : "銘柄ごとに切り捨て",
+               m_warm ? "あり" : "なし",
+               m_regDays > 0 ? StringFormat("あり（過去 %d 日の MAC5 の平均が %+.2f を超えたら IBS を止める）", m_regDays, m_regThr) : "なし",
+               m_dryRun ? "、**観察モード（注文は出しません）**" : "");
+   //--- 起動時に、日足の履歴からルールの状態を復元する（状態のファイルがなくても、止まっていても、同じ状態に戻る）
+   if(m_warm)
+      for(int i = 0; i < m_n; i++)
+         Reconstruct(i);
    return(m_n > 0);
   }
 
@@ -339,6 +416,11 @@ double CIndexSleeves::NormalizeLots(const string sym, const double lots)
 //+------------------------------------------------------------------+
 void CIndexSleeves::CloseSymbol(const string sym, const string why)
   {
+   if(m_dryRun)
+     {
+      PrintFormat("[AMS] 指数の層：（観察モード）%s を決済するところ（%s）", sym, why);
+      return;
+     }
    m_trade.SetTypeFillingBySymbol(sym);
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -357,6 +439,15 @@ void CIndexSleeves::CloseSymbol(const string sym, const string why)
 //+------------------------------------------------------------------+
 void CIndexSleeves::OpenLots(const string sym, double lots, const double dailyVol)
   {
+   if(m_dryRun)
+     {
+      const double b = SymbolInfoDouble(sym, SYMBOL_BID);
+      PrintFormat("[AMS] 指数の層：（観察モード）%s を %.2f lot 買うところ（買値 %s、スプレッド %.4f%%、逆指値 %s）", sym, lots,
+                  DoubleToString(SymbolInfoDouble(sym, SYMBOL_ASK), (int)SymbolInfoInteger(sym, SYMBOL_DIGITS)),
+                  b > 0.0 ? (SymbolInfoDouble(sym, SYMBOL_ASK) - b) / b * 100.0 : 0.0,
+                  (m_slVolMul > 0.0 && dailyVol > 0.0) ? DoubleToString(b * (1.0 - m_slVolMul * dailyVol), (int)SymbolInfoInteger(sym, SYMBOL_DIGITS)) : "なし");
+      return;
+     }
    m_trade.SetTypeFillingBySymbol(sym);
    const double mx  = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
    const int    dg  = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
@@ -382,6 +473,11 @@ void CIndexSleeves::OpenLots(const string sym, double lots, const double dailyVo
 //+------------------------------------------------------------------+
 void CIndexSleeves::ReduceLots(const string sym, double lots)
   {
+   if(m_dryRun)
+     {
+      PrintFormat("[AMS] 指数の層：（観察モード）%s を %.2f lot 減らすところ", sym, lots);
+      return;
+     }
    m_trade.SetTypeFillingBySymbol(sym);
    for(int i = PositionsTotal() - 1; i >= 0 && lots > 1e-9; i--)
      {
@@ -412,7 +508,7 @@ void CIndexSleeves::ReduceLots(const string sym, double lots)
 //+------------------------------------------------------------------+
 void CIndexSleeves::ApplyStops(const string sym, const double dailyVol)
   {
-   if(m_slVolMul <= 0.0 || dailyVol <= 0.0)
+   if(m_slVolMul <= 0.0 || dailyVol <= 0.0 || m_dryRun)
       return;
    const double bid = SymbolInfoDouble(sym, SYMBOL_BID);
    const double pt  = SymbolInfoDouble(sym, SYMBOL_POINT);
@@ -639,6 +735,8 @@ void CIndexSleeves::Summary(void)
       PrintFormat("[AMS] 指数の層：区切りの前に手じまった回数 %I64d、スワップのほうが安くて持ち越した回数 %I64d", m_flatCount, m_flatSkip);
    if(m_soGuard > 0.0)
       PrintFormat("[AMS] 指数の層：強制ロスカットを避ける上限で建玉を縮めた回数 %I64d", m_soCut);
+   if(m_joint)
+      PrintFormat("[AMS] 指数の層：まとめて丸めて、切り捨てより建玉が増えた回数 %I64d", m_jointUp);
   }
 
 //+------------------------------------------------------------------+
@@ -722,33 +820,16 @@ void CIndexSleeves::LoadState(void)
   }
 
 //+------------------------------------------------------------------+
-//| 新しい日足が始まった銘柄を処理する：確定した日足でルールの状態を更新し、   |
-//| 目標のロットに合わせる。日足がそろわないときは false（あとでやり直す）    |
+//| 日足 jStart〜got-1 を古い順に見て、ルールの状態を更新する               |
+//| entryOnAll = true なら、途中の日足でも「買い」の判定をする（状態の復元用）  |
 //+------------------------------------------------------------------+
-bool CIndexSleeves::Process(const int i, const datetime t0)
+void CIndexSleeves::UpdateStates(const int i, const MqlRates &rt[], const int got, const int jStart, const bool entryOnAll,
+                                 bool &changed, string &note)
   {
-   const string sym = m_sym[i];
-   MqlRates rt[];
-   ArraySetAsSeries(rt, false);
-   const int got = CopyRates(sym, PERIOD_D1, 1, IX_BARS, rt);
-   if(got < 215)
-     {
-      Warn(i, StringFormat("確定した日足が %d 本しかないため、まだ判定できません（215 本以上が必要）", got));
-      return(false);
-     }
-   //--- 前回の処理のあとに確定した日足（ふつうは1本）。止まっていたあいだの分は、手じまいの条件だけを古い順に確かめる
-   int jStart = got - 1;
-   if(m_lastBar[i] > 0)
-      for(int j = got - 1; j >= 0 && j >= got - IX_REPLAY; j--)
-         if(rt[j].time >= m_lastBar[i])
-            jStart = j;
-   if(jStart < 205)
-      jStart = 205;
-   bool changed = false;
-   string note = "";
    for(int j = jStart; j < got; j++)
      {
-      const bool newest = (j == got - 1);
+      const bool last   = (j == got - 1);
+      const bool newest = last || entryOnAll;
       const double c = rt[j].close;
       double s200 = 0.0, s5 = 0.0, mn7 = c, mx7 = c;
       for(int k = j - 199; k <= j; k++)
@@ -824,9 +905,10 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
                note += StringFormat(" D7 買い（終値 %.2f > 200日の平均 %.2f、過去7日の終値の最安値）", c, s200);
               }
            }
-         if(m_ruleOn[IX_IBS] && newest)
+         if(m_ruleOn[IX_IBS] && last)
            {
-            const int st = (ibs < 0.2) ? 1 : 0;
+            //--- 前提の監視：値動きが続きやすい相場と判定されているあいだは、IBS を持たない
+            const int st = (ibs < 0.2 && m_regOn[i] > 0) ? 1 : 0;
             if(st != m_state[i][IX_IBS])
               {
                m_state[i][IX_IBS] = st;
@@ -835,7 +917,7 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
               }
            }
         }
-      if(m_trd[i] && newest && (m_trendCheck[i] == 0 || (long)rt[j].time - (long)m_trendCheck[i] >= (long)m_trendDays * 86400))
+      if(m_trd[i] && last && (m_trendCheck[i] == 0 || (long)rt[j].time - (long)m_trendCheck[i] >= (long)m_trendDays * 86400))
         {
          m_trendCheck[i] = rt[j].time;
          const int st = above ? 1 : 0;
@@ -847,6 +929,133 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
            }
         }
      }
+  }
+
+//+------------------------------------------------------------------+
+//| 前提の監視の値：過去 m_regDays 日の MAC5 の平均                        |
+//| MAC5 = 当日の値動き ×（4×前日 + 3×2日前 + 2×3日前 + 4日前）÷（5 × 分散）   |
+//| 分散は、その日までの250日。日足が足りなければ EMPTY_VALUE               |
+//+------------------------------------------------------------------+
+double CIndexSleeves::RegimeValue(const string sym)
+  {
+   if(m_regDays <= 0)
+      return(EMPTY_VALUE);
+   const int need = m_regDays + 256;
+   MqlRates rt[];
+   ArraySetAsSeries(rt, false);
+   const int got = CopyRates(sym, PERIOD_D1, 1, need, rt);
+   if(got < m_regDays / 2 + 256)
+      return(EMPTY_VALUE);
+   double r[];
+   ArrayResize(r, got);
+   r[0] = 0.0;
+   for(int k = 1; k < got; k++)
+      r[k] = (rt[k].close > 0.0 && rt[k - 1].close > 0.0) ? MathLog(rt[k].close / rt[k - 1].close) : 0.0;
+   //--- 250日の分散を、足し引きで順に更新する
+   double sum = 0.0, sum2 = 0.0, acc = 0.0;
+   int    cnt = 0;
+   for(int k = 1; k < got; k++)
+     {
+      sum  += r[k];
+      sum2 += r[k] * r[k];
+      if(k > 250)
+        {
+         sum  -= r[k - 250];
+         sum2 -= r[k - 250] * r[k - 250];
+        }
+      if(k < 250 || k < got - m_regDays)
+         continue;
+      const double var = (sum2 - sum * sum / 250.0) / 249.0;
+      if(var <= 0.0)
+         continue;
+      acc += r[k] * (4.0 * r[k - 1] + 3.0 * r[k - 2] + 2.0 * r[k - 3] + r[k - 4]) / (5.0 * var);
+      cnt++;
+     }
+   if(cnt < m_regDays / 2)
+      return(EMPTY_VALUE);
+   return(acc / cnt);
+  }
+
+//+------------------------------------------------------------------+
+//| 起動時：日足の履歴から、ルールの状態を作り直す                          |
+//| （直近80本を、何も持っていない状態から順にたどる。R2・D7 は数日〜数十日で   |
+//|   手じまうので、これで今の状態が決まる）                                |
+//+------------------------------------------------------------------+
+void CIndexSleeves::Reconstruct(const int i)
+  {
+   const string sym = m_sym[i];
+   MqlRates rt[];
+   ArraySetAsSeries(rt, false);
+   const int got = CopyRates(sym, PERIOD_D1, 1, IX_BARS + 80, rt);
+   if(got < 215)
+     {
+      PrintFormat("[AMS] 指数の層：%s 確定した日足が %d 本しかないため、状態を復元できません", sym, got);
+      return;
+     }
+   const string before = StateText(i);
+   for(int r = 0; r < 3; r++)
+      m_state[i][r] = 0;
+   if(m_regDays > 0)
+     {
+      m_regVal[i] = RegimeValue(sym);
+      m_regOn[i]  = (m_regVal[i] != EMPTY_VALUE && m_regVal[i] > m_regThr) ? 0 : 1;
+     }
+   bool changed = false;
+   string note = "";
+   const datetime keepCheck = m_trendCheck[i];
+   UpdateStates(i, rt, got, (int)MathMax(205, got - 80), true, changed, note);
+   if(m_trd[i] && keepCheck == 0)
+     {
+      //--- 順張り：前回の見直しの記録がなければ、最後の日足で判定する
+      double s200 = 0.0;
+      for(int k = got - 200; k < got; k++)
+         s200 += rt[k].close;
+      m_state[i][IX_TREND] = (rt[got - 1].close > s200 / 200.0) ? 1 : 0;
+      m_trendCheck[i] = rt[got - 1].time;
+     }
+   PrintFormat("[AMS] 指数の層：%s 状態の復元（最後の日足 %s）：%s%s%s", sym, TimeToString(rt[got - 1].time, TIME_DATE), StateText(i),
+               before != StateText(i) ? "（記録では " + before + "）" : "",
+               m_regDays > 0 ? (m_regVal[i] == EMPTY_VALUE ? "、前提の監視：日足が足りず計算できない（IBS は使う）"
+                                : StringFormat("、前提の監視 %+.3f（%s）", m_regVal[i], m_regOn[i] > 0 ? "反転しやすい相場" : "続きやすい相場：IBS を止める")) : "");
+  }
+
+//+------------------------------------------------------------------+
+//| 判定：確定した日足でルールの状態を更新し、値動きの見積もりと、            |
+//| 目標の建玉の額（有効証拠金に対する割合）を計算する。売買はしない。         |
+//| 日足がそろわないときは false（あとでやり直す）                          |
+//+------------------------------------------------------------------+
+bool CIndexSleeves::Evaluate(const int i, const datetime t0)
+  {
+   const string sym = m_sym[i];
+   m_evOk[i] = false;
+   MqlRates rt[];
+   ArraySetAsSeries(rt, false);
+   const int got = CopyRates(sym, PERIOD_D1, 1, IX_BARS, rt);
+   if(got < 215)
+     {
+      Warn(i, StringFormat("確定した日足が %d 本しかないため、まだ判定できません（215 本以上が必要）", got));
+      return(false);
+     }
+   //--- 前提の監視（IBS を使ってよいか）
+   if(m_regDays > 0)
+     {
+      m_regVal[i] = RegimeValue(sym);
+      const int on = (m_regVal[i] != EMPTY_VALUE && m_regVal[i] > m_regThr) ? 0 : 1;
+      if(on != m_regOn[i])
+         PrintFormat("[AMS] 指数の層：%s 前提の監視 %+.3f → %s", sym, m_regVal[i], on > 0 ? "反転しやすい相場に戻った（IBS を使う）" : "続きやすい相場（IBS を止める）");
+      m_regOn[i] = on;
+     }
+   //--- 前回の処理のあとに確定した日足（ふつうは1本）。止まっていたあいだの分は、手じまいの条件だけを古い順に確かめる
+   int jStart = got - 1;
+   if(m_lastBar[i] > 0)
+      for(int j = got - 1; j >= 0 && j >= got - IX_REPLAY; j--)
+         if(rt[j].time >= m_lastBar[i])
+            jStart = j;
+   if(jStart < 205)
+      jStart = 205;
+   bool changed = false;
+   string note = "";
+   UpdateStates(i, rt, got, jStart, false, changed, note);
    //--- 翌日の値動きの大きさの見積もり（1日の標準偏差）
    double dailyVol = 0.0;
    if(m_volModel == 1)
@@ -890,13 +1099,36 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
       dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
      }
    const double annVol = MathMax(dailyVol * MathSqrt(252.0), 0.025);
-   //--- 目標の建玉の額（戻りの分は、VIX の状態で倍率をかける）
-   const double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   //--- 目標の建玉の額（戻りの分は、VIX の状態で倍率をかける）。有効証拠金に対する割合で持っておく
    const int nRev = m_state[i][IX_R2] + m_state[i][IX_D7] + m_state[i][IX_IBS];
    string vixNote = "";
    const double vmult = (nRev > 0) ? VixMult(rt[got - 1].time, vixNote) : 1.0;
-   double tgt = equity * (m_ruleW[nRev] * m_revUnit * vmult + m_state[i][IX_TREND] * m_trendUnit) / 100.0 / annVol;
-   m_dvol[i] = dailyVol;
+   m_evFrac[i]    = (m_ruleW[nRev] * m_revUnit * vmult + m_state[i][IX_TREND] * m_trendUnit) / 100.0 / annVol;
+   m_evChanged[i] = changed;
+   m_evNote[i]    = note;
+   m_evVix[i]     = vixNote;
+   m_evAnnVol[i]  = annVol;
+   m_dvol[i]      = dailyVol;
+   m_evOk[i]      = true;
+   return(true);
+  }
+
+//+------------------------------------------------------------------+
+//| 新しい日足が始まった銘柄を処理する（銘柄ごとに切り捨てる形）：            |
+//| 判定のあと、目標のロットに合わせる                                    |
+//+------------------------------------------------------------------+
+bool CIndexSleeves::Process(const int i, const datetime t0)
+  {
+   if(!Evaluate(i, t0))
+      return(false);
+   const string sym      = m_sym[i];
+   const bool   changed  = m_evChanged[i];
+   string       note     = m_evNote[i];
+   const string vixNote  = m_evVix[i];
+   const double dailyVol = m_dvol[i];
+   const double annVol   = m_evAnnVol[i];
+   const double equity   = AccountInfoDouble(ACCOUNT_EQUITY);
+   double tgt = equity * m_evFrac[i];
    //--- ほかの銘柄の建玉の額（最小の取引単位に届かず持っていない銘柄は、数えない）
    double others = 0.0;
    for(int k = 0; k < m_n; k++)
@@ -992,12 +1224,342 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
   }
 
 //+------------------------------------------------------------------+
+//| 目標のロット tl に合わせて売買する（まとめて丸める形で使う）              |
+//+------------------------------------------------------------------+
+void CIndexSleeves::TradeTo(const int i, const double tl, const bool changed, const double equity, string &note)
+  {
+   const string sym      = m_sym[i];
+   const double dailyVol = m_dvol[i];
+   int cdir = 0;
+   double cur = CurrentLots(sym, cdir);
+   if(cdir < 0)
+     {
+      CloseSymbol(sym, "売りの建玉は持たない");
+      cur = 0.0;
+     }
+   if(tl <= 0.0)
+     {
+      if(cur > 0.0)
+         CloseSymbol(sym, "持つルールがなくなった");
+     }
+   else if(changed || MathAbs(cur - tl) > m_band * MathMax(cur, tl))
+     {
+      if(tl > cur)
+        {
+         double add = tl - cur;
+         //--- 必要証拠金が上限を超えるときは、増やす分を小さくする
+         double need = 0.0;
+         if(!m_dryRun && m_maxMarginPct > 0.0 && OrderCalcMargin(ORDER_TYPE_BUY, sym, add, SymbolInfoDouble(sym, SYMBOL_ASK), need) && need > 0.0)
+           {
+            const double room = equity * m_maxMarginPct / 100.0 - AccountInfoDouble(ACCOUNT_MARGIN);
+            if(room <= 0.0)
+               add = 0.0;
+            else if(need > room)
+               add = NormalizeLots(sym, add * room / need);
+            if(add < tl - cur)
+               note += " （証拠金の上限のため縮小）";
+           }
+         if(add > 0.0)
+            OpenLots(sym, add, dailyVol);
+        }
+      else if(cur > tl)
+         ReduceLots(sym, cur - tl);
+     }
+   //--- 逆指値を、今の値段から置き直す（持っている建玉すべて）
+   if(tl > 0.0)
+      ApplyStops(sym, dailyVol);
+  }
+
+//+------------------------------------------------------------------+
+//| まとめて丸める形：判定の済んだ銘柄の目標を、まとめてロットに直して売買する  |
+//|  1 上限（建玉の合計・強制ロスカットを避ける上限）は、同じ割合で縮める       |
+//|  2 ルールが出ている戻りの銘柄を、「目標とのずれの分散」が最小になるように    |
+//|    1刻みずつ動かして丸める（全体の値動きは、目標の (1 + ε) 倍まで）         |
+//+------------------------------------------------------------------+
+void CIndexSleeves::ExecuteJoint(void)
+  {
+   const double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   const double kk = (m_slVolMul > 0.0) ? m_slVolMul : 4.0;
+   const double so = (AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE) == ACCOUNT_STOPOUT_MODE_PERCENT) ? AccountInfoDouble(ACCOUNT_MARGIN_SO_SO) / 100.0 : 1.0;
+   double npl[], mrate[], tgt[], xs[], tl[], need1[];
+   bool   pend[];
+   ArrayResize(npl, m_n);
+   ArrayResize(mrate, m_n);
+   ArrayResize(tgt, m_n);
+   ArrayResize(xs, m_n);
+   ArrayResize(tl, m_n);
+   ArrayResize(need1, m_n);
+   ArrayResize(pend, m_n);
+   bool anyChanged = false;
+   int  nPend = 0;
+   for(int i = 0; i < m_n; i++)
+     {
+      npl[i] = NotionalPerLot(m_sym[i]);
+      double mg = 0.0;
+      mrate[i] = (npl[i] > 0.0 && OrderCalcMargin(ORDER_TYPE_BUY, m_sym[i], 1.0, SymbolInfoDouble(m_sym[i], SYMBOL_ASK), mg) && mg > 0.0) ? mg / npl[i] : 0.1;
+      need1[i] = kk * m_dvol[i] + so * mrate[i];             // 建玉の額1あたりの、上限の計算での重さ
+      const datetime t0 = iTime(m_sym[i], PERIOD_D1, 0);
+      pend[i] = (m_evOk[i] && t0 > 0 && m_evalBar[i] == t0 && t0 != m_lastBar[i] && npl[i] > 0.0);
+      if(pend[i])
+        {
+         tgt[i] = equity * m_evFrac[i];
+         nPend++;
+         if(m_evChanged[i])
+            anyChanged = true;
+        }
+      else
+         tgt[i] = m_tgtLots[i] * npl[i];                     // 今回は判定していない銘柄：そのまま
+     }
+   if(nPend == 0)
+      return;
+   //--- 上限：判定した銘柄を、同じ割合で縮める
+   double fixedN = 0.0, pendN = 0.0, fixedNeed = 0.0, pendNeed = 0.0;
+   for(int i = 0; i < m_n; i++)
+     {
+      if(pend[i])
+        {
+         pendN += tgt[i];
+         pendNeed += tgt[i] * need1[i];
+        }
+      else
+        {
+         fixedN += tgt[i];
+         fixedNeed += tgt[i] * need1[i];
+        }
+     }
+   double scale = 1.0;
+   string capNote = "";
+   if(m_maxLev > 0.0 && pendN > 0.0 && fixedN + pendN > m_maxLev * equity)
+     {
+      scale = MathMin(scale, MathMax(0.0, (m_maxLev * equity - fixedN) / pendN));
+      capNote += " （建玉の合計の上限のため縮小）";
+     }
+   if(m_soGuard > 0.0 && pendNeed > 0.0 && fixedNeed + pendNeed > m_soGuard * equity)
+     {
+      scale = MathMin(scale, MathMax(0.0, (m_soGuard * equity - fixedNeed) / pendNeed));
+      capNote += " （強制ロスカットを避ける上限のため縮小）";
+      m_soCut++;
+     }
+   int act[];
+   int na = 0;
+   for(int i = 0; i < m_n; i++)
+     {
+      if(pend[i])
+        {
+         tgt[i] *= scale;
+         m_target[i] = tgt[i];
+         xs[i] = tgt[i] / npl[i];
+         tl[i] = NormalizeLots(m_sym[i], xs[i]);
+         if(m_rev[i] && xs[i] > 0.0)
+           {
+            ArrayResize(act, na + 1);
+            act[na++] = i;
+           }
+        }
+      else
+        {
+         xs[i] = m_tgtLots[i];
+         tl[i] = m_tgtLots[i];
+        }
+     }
+   //--- まとめて丸める
+   if(na >= 1)
+     {
+      //--- 値動きの相関（直近60日の日足。そろわなければ 0.9 とみなす）
+      double rets[];
+      ArrayResize(rets, na * 60);
+      datetime tref[60];
+      bool okc = true;
+      for(int a = 0; a < na && okc; a++)
+        {
+         MqlRates rr[];
+         ArraySetAsSeries(rr, false);
+         if(CopyRates(m_sym[act[a]], PERIOD_D1, 1, 61, rr) != 61)
+           {
+            okc = false;
+            break;
+           }
+         for(int q = 0; q < 60; q++)
+           {
+            rets[a * 60 + q] = (rr[q].close > 0.0) ? rr[q + 1].close / rr[q].close - 1.0 : 0.0;
+            if(a == 0)
+               tref[q] = rr[q + 1].time;
+            else if(rr[q + 1].time != tref[q])
+               okc = false;
+           }
+        }
+      double S[];
+      ArrayResize(S, na * na);
+      for(int a = 0; a < na; a++)
+        {
+         for(int b = 0; b < na; b++)
+           {
+            double c = (a == b) ? 1.0 : 0.9;
+            if(okc && a != b)
+              {
+               double ma = 0.0, mb = 0.0, saa = 0.0, sbb = 0.0, sab = 0.0;
+               for(int q = 0; q < 60; q++)
+                 {
+                  ma += rets[a * 60 + q];
+                  mb += rets[b * 60 + q];
+                 }
+               ma /= 60.0;
+               mb /= 60.0;
+               for(int q = 0; q < 60; q++)
+                 {
+                  const double da = rets[a * 60 + q] - ma, db = rets[b * 60 + q] - mb;
+                  saa += da * da;
+                  sbb += db * db;
+                  sab += da * db;
+                 }
+               if(saa > 0.0 && sbb > 0.0)
+                  c = sab / MathSqrt(saa * sbb);
+              }
+            S[a * na + b] = m_dvol[act[a]] * m_dvol[act[b]] * c;
+           }
+        }
+      double x[], nt[], e[], nv[];
+      ArrayResize(x, na);
+      ArrayResize(nt, na);
+      ArrayResize(e, na);
+      ArrayResize(nv, na);
+      double riskT = 0.0;
+      for(int a = 0; a < na; a++)
+        {
+         x[a]  = tl[act[a]];
+         nt[a] = xs[act[a]] * npl[act[a]];
+        }
+      for(int a = 0; a < na; a++)
+         for(int b = 0; b < na; b++)
+            riskT += nt[a] * nt[b] * S[a * na + b];
+      riskT = MathSqrt(MathMax(riskT, 0.0));
+      //--- 戻りの銘柄以外・判定していない銘柄の分（上限の確認に使う）
+      double otherN = 0.0, otherNeed = 0.0;
+      for(int i = 0; i < m_n; i++)
+        {
+         bool isAct = false;
+         for(int a = 0; a < na; a++)
+            if(act[a] == i)
+               isAct = true;
+         if(!isAct)
+           {
+            otherN += tl[i] * npl[i];
+            otherNeed += tl[i] * npl[i] * need1[i];
+           }
+        }
+      double best = 0.0;
+      for(int a = 0; a < na; a++)
+         e[a] = x[a] * npl[act[a]] - nt[a];
+      for(int a = 0; a < na; a++)
+         for(int b = 0; b < na; b++)
+            best += e[a] * e[b] * S[a * na + b];
+      bool up = false;
+      for(int iter = 0; iter < 400; iter++)
+        {
+         int    bestA = -1;
+         double bestX = 0.0, bestTE = best;
+         for(int a = 0; a < na; a++)
+           {
+            const double mn = SymbolInfoDouble(m_sym[act[a]], SYMBOL_VOLUME_MIN);
+            const double st = SymbolInfoDouble(m_sym[act[a]], SYMBOL_VOLUME_STEP);
+            if(st <= 0.0)
+               continue;
+            for(int dirn = 1; dirn >= -1; dirn -= 2)
+              {
+               double y = x[a];
+               if(dirn > 0)
+                  y = (x[a] < mn - 1e-9) ? mn : x[a] + st;
+               else
+                 {
+                  if(x[a] <= 0.0)
+                     continue;
+                  y = (x[a] - st < mn - 1e-9) ? 0.0 : x[a] - st;
+                 }
+               const double keep = x[a];
+               x[a] = y;
+               bool okMove = true;
+               if(dirn > 0)
+                 {
+                  //--- 全体の値動きが、目標の (1 + ε) 倍を超えない／上限を超えない
+                  double rk = 0.0, totN = otherN, totNeed = otherNeed;
+                  for(int q = 0; q < na; q++)
+                    {
+                     nv[q] = x[q] * npl[act[q]];
+                     totN += nv[q];
+                     totNeed += nv[q] * need1[act[q]];
+                    }
+                  for(int q = 0; q < na; q++)
+                     for(int w = 0; w < na; w++)
+                        rk += nv[q] * nv[w] * S[q * na + w];
+                  if(MathSqrt(MathMax(rk, 0.0)) > (1.0 + m_jointEps) * riskT + 1e-9)
+                     okMove = false;
+                  if(m_maxLev > 0.0 && totN > m_maxLev * equity)
+                     okMove = false;
+                  if(m_soGuard > 0.0 && totNeed > m_soGuard * equity)
+                     okMove = false;
+                 }
+               if(okMove)
+                 {
+                  double te = 0.0;
+                  for(int q = 0; q < na; q++)
+                     e[q] = x[q] * npl[act[q]] - nt[q];
+                  for(int q = 0; q < na; q++)
+                     for(int w = 0; w < na; w++)
+                        te += e[q] * e[w] * S[q * na + w];
+                  if(te < bestTE - 1e-9)
+                    {
+                     bestTE = te;
+                     bestA  = a;
+                     bestX  = y;
+                    }
+                 }
+               x[a] = keep;
+              }
+           }
+         if(bestA < 0)
+            break;
+         x[bestA] = bestX;
+         best = bestTE;
+        }
+      for(int a = 0; a < na; a++)
+        {
+         const double v = NormalizeLots(m_sym[act[a]], x[a]);
+         if(v > tl[act[a]] + 1e-9)
+            up = true;
+         tl[act[a]] = v;
+        }
+      if(up)
+         m_jointUp++;
+     }
+   //--- 売買
+   for(int i = 0; i < m_n; i++)
+     {
+      if(!pend[i])
+         continue;
+      const string sym  = m_sym[i];
+      const double base = NormalizeLots(sym, xs[i]);
+      string note = m_evNote[i] + capNote;
+      if(MathAbs(tl[i] - base) > 1e-9)
+         note += StringFormat(" （まとめて丸め：目標 %.3f lot → %.2f lot。切り捨てなら %.2f lot）", xs[i], tl[i], base);
+      else if(xs[i] > 0.0 && tl[i] <= 0.0)
+         note += StringFormat(" （目標 %.3f lot が最小の取引単位 %.2f lot に届かないため、持たない）", xs[i], SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN));
+      m_tgtLots[i] = tl[i];
+      TradeTo(i, tl[i], anyChanged, equity, note);
+      if(m_evChanged[i] || note != "")
+         PrintFormat("[AMS] 指数の層：%s%s → 持つルール：%s、目標 %.2f lot（額 %.0f、値動きの見積もり 年 %.1f%%%s）", sym, note, StateText(i), tl[i], tgt[i],
+                     m_evAnnVol[i] * 100.0, m_evVix[i] == "" ? "" : "、" + m_evVix[i]);
+      m_lastBar[i] = m_evalBar[i];
+     }
+  }
+
+//+------------------------------------------------------------------+
 //| 毎ティック：新しい日足が始まった銘柄を処理する                          |
 //+------------------------------------------------------------------+
 void CIndexSleeves::OnTick(void)
   {
    const datetime now = TimeCurrent();
    bool saved = false;
+   int  waiting = 0, pending = 0;
    for(int i = 0; i < m_n; i++)
      {
       if(m_flatMin > 0)
@@ -1005,6 +1567,12 @@ void CIndexSleeves::OnTick(void)
       const datetime t0 = iTime(m_sym[i], PERIOD_D1, 0);
       if(t0 <= 0 || t0 == m_lastBar[i])
          continue;
+      if(m_joint && m_evOk[i] && m_evalBar[i] == t0)
+        {
+         pending++;                                   // 判定は済んでいて、まとめての売買を待っている
+         continue;
+        }
+      waiting++;
       if(m_seenBar[i] != t0)
         {
          m_seenBar[i] = t0;
@@ -1023,9 +1591,30 @@ void CIndexSleeves::OnTick(void)
          Warn(i, StringFormat("スプレッドが広いため待ちます（%.3f%%、上限 %.3f%%）", (tk.ask - tk.bid) / tk.bid * 100.0, m_maxSpreadPct));
          continue;
         }
-      if(!Process(i, t0))
-         continue;
-      m_lastBar[i] = t0;
+      if(!m_joint)
+        {
+         if(!Process(i, t0))
+            continue;
+         m_lastBar[i] = t0;
+         saved = true;
+         waiting--;
+        }
+      else
+        {
+         if(!Evaluate(i, t0))
+            continue;
+         m_evalBar[i] = t0;
+         waiting--;
+         pending++;
+         if(m_firstEval == 0)
+            m_firstEval = now;
+        }
+     }
+   //--- まとめて丸める形：すべての銘柄の判定がそろったら（そろわなくても、最初の判定から2分たったら）売買する
+   if(m_joint && pending > 0 && (waiting == 0 || (long)now - (long)m_firstEval >= 120))
+     {
+      ExecuteJoint();
+      m_firstEval = 0;
       saved = true;
      }
    if(saved)
