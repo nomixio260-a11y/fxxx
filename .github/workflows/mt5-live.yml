@@ -80,8 +80,13 @@ jobs:
         run: |
           gh workflow run mt5-live.yml --ref "$GITHUB_REF_NAME" \
             -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を予約しました（この回が終わると始まります）"
+          # 見張り役（mt5-watchdog.yml）が動いていなければ、起動しておく（お互いに見張る）
+          w=$(gh run list --workflow mt5-watchdog.yml --branch "$GITHUB_REF_NAME" --limit 5 --json status \
+                --jq '[.[] | select(.status != "completed")] | length' || echo 1)
+          if [ "${w:-1}" = "0" ]; then gh workflow run mt5-watchdog.yml --ref "$GITHUB_REF_NAME" && echo "見張り役を起動しました" || true; fi
 
       - name: Run EA on the demo account
+        id: runea
         shell: pwsh
         run: ./tools/ci/live.ps1
 
@@ -98,10 +103,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 始めに予約した次の回が待っていれば、何もしない（予約に失敗していたときだけ、ここで起動する）
-          n=$(gh run list --workflow mt5-live.yml --branch "$GITHUB_REF_NAME" --limit 20 --json status \
-                --jq '[.[] | select(.status=="pending" or .status=="queued" or .status=="waiting" or .status=="requested")] | length' || echo 0)
+          # 始めに予約した次の回が待っていれば、何もしない（予約に失敗していたときだけ、ここで起動する）。
+          # 「この回より後に作られて、まだ終わっていない回」だけを数える（2026年11月22日、終わったばかりの前の回を
+          # 待っている回と数えてしまい、つなぎが切れたため）。
+          n=$(gh run list --workflow mt5-live.yml --branch "$GITHUB_REF_NAME" --limit 20 --json status,number \
+                --jq "[.[] | select(.number > ${GITHUB_RUN_NUMBER} and .status != \"completed\")] | length" || echo 0)
           if [ "${n:-0}" -gt 0 ]; then echo "次の回は予約済みです"; exit 0; fi
+          # EA を動かす前に失敗した回（インストールの失敗など）は、すぐにやり直すと失敗を繰り返すので、5分待つ
+          if [ "${{ steps.runea.outcome }}" != "success" ]; then echo "EA を動かす前に失敗したため、5分待ってから次の回を起動します"; sleep 300; fi
           gh workflow run mt5-live.yml --ref "$GITHUB_REF_NAME" \
             -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を起動しました"
 
