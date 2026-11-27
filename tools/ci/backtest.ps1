@@ -225,7 +225,7 @@ try {
 
 # レポート・ログの回収（ログは UTF-16 → UTF-8）
 Get-ChildItem "$dir\reports\$reportName*" -ErrorAction SilentlyContinue | Copy-Item -Destination $out -Force
-foreach ($f in 'AMS_breakdown.csv', 'AMS_monthly.csv', 'AMS_rulemonth.csv', 'AMS_bt_deals.csv') {
+foreach ($f in 'AMS_breakdown.csv', 'AMS_monthly.csv', 'AMS_rulemonth.csv', 'AMS_bt_deals.csv', 'AMS_symbols.csv') {
   $common = Join-Path $env:APPDATA "MetaQuotes\Terminal\Common\Files\$f"
   if (Test-Path $common) { Get-Content $common | Out-File "$out\$f" -Encoding utf8 }
 }

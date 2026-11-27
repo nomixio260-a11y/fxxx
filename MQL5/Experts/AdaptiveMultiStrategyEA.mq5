@@ -1200,6 +1200,27 @@ int OnInit(void)
             line = "";
            }
         }
+      //--- 銘柄ごとの仕様（スワップなど）を、共通フォルダの AMS_symbols.csv に書き出す（金利差の層を広げる研究用）
+      const int fh = FileOpen("AMS_symbols.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+      if(fh != INVALID_HANDLE)
+        {
+         FileWrite(fh, "symbol", "path", "digits", "point", "contract", "swap_mode", "swap_long", "swap_short", "swap_3days", "spread_points",
+                   "vol_min", "vol_step", "calc_mode", "base", "profit", "bid");
+         for(int i = 0; i < total; i++)
+           {
+            const string nm = SymbolName(i, false);
+            FileWrite(fh, nm, SymbolInfoString(nm, SYMBOL_PATH), IntegerToString(SymbolInfoInteger(nm, SYMBOL_DIGITS)),
+                      DoubleToString(SymbolInfoDouble(nm, SYMBOL_POINT), 8), DoubleToString(SymbolInfoDouble(nm, SYMBOL_TRADE_CONTRACT_SIZE), 2),
+                      IntegerToString(SymbolInfoInteger(nm, SYMBOL_SWAP_MODE)), DoubleToString(SymbolInfoDouble(nm, SYMBOL_SWAP_LONG), 4),
+                      DoubleToString(SymbolInfoDouble(nm, SYMBOL_SWAP_SHORT), 4), IntegerToString(SymbolInfoInteger(nm, SYMBOL_SWAP_ROLLOVER3DAYS)),
+                      IntegerToString(SymbolInfoInteger(nm, SYMBOL_SPREAD)), DoubleToString(SymbolInfoDouble(nm, SYMBOL_VOLUME_MIN), 2),
+                      DoubleToString(SymbolInfoDouble(nm, SYMBOL_VOLUME_STEP), 2), IntegerToString(SymbolInfoInteger(nm, SYMBOL_TRADE_CALC_MODE)),
+                      SymbolInfoString(nm, SYMBOL_CURRENCY_BASE), SymbolInfoString(nm, SYMBOL_CURRENCY_PROFIT),
+                      DoubleToString(SymbolInfoDouble(nm, SYMBOL_BID), 6));
+           }
+         FileClose(fh);
+         PrintFormat("[AMS] 銘柄の仕様を AMS_symbols.csv に書き出しました（%d 銘柄）", total);
+        }
       return(INIT_FAILED);
      }
 
