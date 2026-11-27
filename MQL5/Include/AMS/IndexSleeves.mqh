@@ -34,6 +34,14 @@
 //|  建玉にかかる。そこで、その夜のスワップが、持ち直すときのスプレッドより      |
 //|  高いときだけ、区切りの数分前にいったん手じまい、次の日足の判定のあとに      |
 //|  持ち直す。何を買うかの判断（ルール）は変えない。                          |
+//|                                                                  |
+//| 強制ロスカットを数式で避ける仕組み（99章）：                             |
+//|  建玉の合計を、「すべての建玉が逆指値（その日の値動きの見積もり × k）に     |
+//|  かかっても、証拠金維持率がロスカットの水準を下回らない」大きさに抑える：    |
+//|    Σ 建玉の額 ×（k × 1日の値動きの見積もり + ロスカットの水準 × 証拠金率）    |
+//|      ≤ 有効証拠金 × 余裕の係数                                        |
+//| ルールがそろった数の重み（99章）：1つ・2つ・3つのときの建玉の単位を入力で   |
+//|  決める（1,2,3 = ルールの数に比例。1,2,4 = 3つそろったときに厚くする）。    |
 //+------------------------------------------------------------------+
 #ifndef AMS_INDEXSLEEVES_MQH
 #define AMS_INDEXSLEEVES_MQH
@@ -78,6 +86,10 @@ private:
    datetime          m_flatDone[];     // 区切りの前の判断を済ませた日足の時刻
    long              m_flatCount;      // 区切りの前に手じまった回数
    long              m_flatSkip;       // スワップのほうが安いので持ち越した回数
+   double            m_ruleW[4];       // ルールが 0・1・2・3 つ出ているときの建玉の単位
+   double            m_soGuard;        // 強制ロスカットを避ける上限の、余裕の係数（0 で使わない）
+   double            m_dvol[];         // 銘柄ごとの、最後に計算した1日の値動きの見積もり
+   long              m_soCut;          // 上の上限で建玉を縮めた回数
    int               m_delaySec;       // 新しい日足が始まってから、売買するまで待つ秒数
    double            m_maxSpreadPct;   // スプレッドがこの割合（値段に対する %）を超えているあいだは待つ
    int               m_state[][IX_NR]; // ルールごとの状態（1 = 持つ）
@@ -114,7 +126,7 @@ public:
                           const int trendDays, const double maxLev, const double maxMarginPct, const double band,
                           const double slVolMul, const int delayMin, const double maxSpreadPct,
                           const int volModel, const string vixFile, const double vixLow, const double vixHigh,
-                          const int flatMin, const double flatEdgeBp);
+                          const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard);
    void              OnTick(void);
    void              Summary(void);
   };
@@ -125,7 +137,7 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                          const int trendDays, const double maxLev, const double maxMarginPct, const double band,
                          const double slVolMul, const int delayMin, const double maxSpreadPct,
                          const int volModel, const string vixFile, const double vixLow, const double vixHigh,
-                         const int flatMin, const double flatEdgeBp)
+                         const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard)
   {
    m_trade        = trade;
    m_magic        = magic;
@@ -151,6 +163,24 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_flatEdgeBp   = flatEdgeBp;
    m_flatCount    = 0;
    m_flatSkip     = 0;
+   m_soGuard      = MathMax(0.0, soGuard);
+   m_soCut        = 0;
+   //--- ルールがそろった数の重み（「1,2,4」の形。読めないときは 1,2,3 = ルールの数に比例）
+   m_ruleW[0] = 0.0;
+   m_ruleW[1] = 1.0;
+   m_ruleW[2] = 2.0;
+   m_ruleW[3] = 3.0;
+   string wparts[];
+   if(StringSplit(ruleWeights, ',', wparts) == 3)
+     {
+      const double w1 = StringToDouble(wparts[0]), w2 = StringToDouble(wparts[1]), w3 = StringToDouble(wparts[2]);
+      if(w1 >= 0.0 && w2 >= 0.0 && w3 > 0.0)
+        {
+         m_ruleW[1] = w1;
+         m_ruleW[2] = w2;
+         m_ruleW[3] = w3;
+        }
+     }
    ArrayResize(m_vixDate, 0);
    ArrayResize(m_vixVal, 0);
    m_stateFile    = StringFormat("AMS_ix_state_%I64u.csv", magic);
@@ -190,9 +220,11 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    ArrayResize(m_target, m_n);
    ArrayResize(m_warnAt, m_n);
    ArrayResize(m_flatDone, m_n);
+   ArrayResize(m_dvol, m_n);
    for(int i = 0; i < m_n; i++)
      {
       m_flatDone[i] = 0;
+      m_dvol[i] = 0.0;
       for(int r = 0; r < IX_NR; r++)
          m_state[i][r] = 0;
       m_lastBar[i] = 0;
@@ -247,6 +279,9 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    if(m_flatMin > 0)
       PrintFormat("[AMS] 指数の層：その夜のスワップがスプレッドより値段の %.2f/10000 以上高いときは、取引の区切りの %d 分前に手じまい、次の日足の判定のあとに持ち直します",
                   m_flatEdgeBp, m_flatMin);
+   PrintFormat("[AMS] 指数の層：ルールがそろった数の重み 1つ %.2f・2つ %.2f・3つ %.2f、強制ロスカットを避ける上限 %s（ロスカットの水準 %.0f%%）",
+               m_ruleW[1], m_ruleW[2], m_ruleW[3], m_soGuard > 0.0 ? StringFormat("あり（余裕の係数 %.2f）", m_soGuard) : "なし",
+               (AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE) == ACCOUNT_STOPOUT_MODE_PERCENT) ? AccountInfoDouble(ACCOUNT_MARGIN_SO_SO) : 100.0);
    return(m_n > 0);
   }
 
@@ -599,6 +634,8 @@ void CIndexSleeves::Summary(void)
   {
    if(m_flatMin > 0)
       PrintFormat("[AMS] 指数の層：区切りの前に手じまった回数 %I64d、スワップのほうが安くて持ち越した回数 %I64d", m_flatCount, m_flatSkip);
+   if(m_soGuard > 0.0)
+      PrintFormat("[AMS] 指数の層：強制ロスカットを避ける上限で建玉を縮めた回数 %I64d", m_soCut);
   }
 
 //+------------------------------------------------------------------+
@@ -855,7 +892,8 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
    const int nRev = m_state[i][IX_R2] + m_state[i][IX_D7] + m_state[i][IX_IBS];
    string vixNote = "";
    const double vmult = (nRev > 0) ? VixMult(rt[got - 1].time, vixNote) : 1.0;
-   double tgt = equity * (nRev * m_revUnit * vmult + m_state[i][IX_TREND] * m_trendUnit) / 100.0 / annVol;
+   double tgt = equity * (m_ruleW[nRev] * m_revUnit * vmult + m_state[i][IX_TREND] * m_trendUnit) / 100.0 / annVol;
+   m_dvol[i] = dailyVol;
    double others = 0.0;
    for(int k = 0; k < m_n; k++)
       if(k != i)
@@ -865,13 +903,41 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
       tgt = MathMax(0.0, m_maxLev * equity - others);
       note += " （建玉の合計の上限のため縮小）";
      }
-   m_target[i] = tgt;
    const double npl = NotionalPerLot(sym);
    if(npl <= 0.0)
      {
       Warn(i, "1 lot の額が計算できないため、まだ売買できません");
       return(false);
      }
+   //--- 強制ロスカットを避ける上限：すべての建玉が逆指値（k × 1日の値動きの見積もり）にかかっても、証拠金維持率がロスカットの水準を下回らない大きさ
+   if(m_soGuard > 0.0 && tgt > 0.0)
+     {
+      const double kk = (m_slVolMul > 0.0) ? m_slVolMul : 4.0;
+      const double so = (AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE) == ACCOUNT_STOPOUT_MODE_PERCENT) ? AccountInfoDouble(ACCOUNT_MARGIN_SO_SO) / 100.0 : 1.0;
+      double used = 0.0;
+      for(int k = 0; k < m_n; k++)
+        {
+         if(k == i || m_target[k] <= 0.0)
+            continue;
+         double mk = 0.0;
+         const double nk = NotionalPerLot(m_sym[k]);
+         if(nk <= 0.0 || !OrderCalcMargin(ORDER_TYPE_BUY, m_sym[k], 1.0, SymbolInfoDouble(m_sym[k], SYMBOL_ASK), mk))
+            mk = 0.1 * nk;
+         used += m_target[k] * (kk * m_dvol[k] + so * ((nk > 0.0) ? mk / nk : 0.1));
+        }
+      double mi = 0.0;
+      if(!OrderCalcMargin(ORDER_TYPE_BUY, sym, 1.0, SymbolInfoDouble(sym, SYMBOL_ASK), mi))
+         mi = 0.1 * npl;
+      const double per   = kk * dailyVol + so * mi / npl;
+      const double allow = (per > 0.0) ? (m_soGuard * equity - used) / per : tgt;
+      if(tgt > allow)
+        {
+         tgt = MathMax(0.0, allow);
+         m_soCut++;
+         note += " （強制ロスカットを避ける上限のため縮小）";
+        }
+     }
+   m_target[i] = tgt;
    const double want = tgt / npl;
    double tl = NormalizeLots(sym, want);
    if(want > 0.0 && tl <= 0.0)
