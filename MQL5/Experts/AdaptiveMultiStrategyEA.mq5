@@ -1218,7 +1218,7 @@ int OnInit(void)
         }
       if(!g_carry.Init(GetPointer(g_trade), InpMagic, syms, InpCtTrendDays, InpCtMinCarry, InpCtTopK, InpCtCrashMul,
                        InpCtVolTarget, InpCtMaxLev, InpMaxMarginUsePct, InpCtRebalanceDays, InpCtHour, InpCtBand,
-                       InpCtSLVolMul, GVName("ct_last3")))
+                       InpCtSLVolMul, GVName("ct_last4")))
         {
          Print("[AMS] 金利差＋トレンド：取引できる銘柄がありません");
          return(INIT_FAILED);

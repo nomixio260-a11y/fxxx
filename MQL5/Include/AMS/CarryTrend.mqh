@@ -105,7 +105,7 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
    m_band         = band;
    m_slVolMul     = slVolMul;
    m_gvKey        = gvKey;
-   m_stateFile    = StringFormat("AMS_ct_state3_%I64u.txt", magic);
+   m_stateFile    = StringFormat("AMS_ct_state4_%I64u.txt", magic);
    m_initAt       = TimeCurrent();
    m_n            = ArraySize(syms);
    ArrayResize(m_sym, m_n);
