@@ -31,7 +31,8 @@ enum ENUM_AMS_ENTRY_MODE
    ENTRY_ASIA_MR     = 4,   // アジア時間の逆張り
    ENTRY_TOKYO_FIX   = 5,   // 東京仲値（ゴトー日）
    ENTRY_CALENDAR    = 6,   // 時刻ルール（複数）
-   ENTRY_CARRY       = 7    // 金利差＋トレンド（日付・時刻を判断に使わない、83章）
+   ENTRY_CARRY       = 7,   // 金利差＋トレンド（日付・時刻を判断に使わない、83章）
+   ENTRY_SLEEVES     = 8    // 株価指数・金の層：売られすぎの戻りと順張り（日付・時刻を判断に使わない、93章）
   };
 
 //--- 売買ロジック
@@ -80,6 +81,7 @@ string EntryModeShortName(const ENUM_AMS_ENTRY_MODE mode)
       case ENTRY_ASIA_MR:     return("AM");
       case ENTRY_TOKYO_FIX:   return("TFX");
       case ENTRY_CALENDAR:    return("CAL");
+      case ENTRY_SLEEVES:     return("IX");
       default:                return("W");
      }
   }

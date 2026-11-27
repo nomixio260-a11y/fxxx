@@ -12,6 +12,17 @@ input string InpFile        = "USDJPY_M1.csv";  // 取り込むCSV（MQL5\Files�
 input string InpSymbol      = "USDJPY_HD";      // 作るカスタム銘柄名
 input string InpOrigin      = "USDJPY";         // 仕様をコピーする元の銘柄（無ければ手動設定）
 input int    InpSpreadPts   = 4;                // 固定スプレッド（point。USDJPYは 4 = 0.4pips）
+//--- 以下は、為替以外（株価指数・金の CFD）を取り込むときに変える。既定値は USDJPY 用
+input int    InpDigits      = 3;                // 小数点以下の桁数
+input double InpContract    = 100000.0;         // 1 lot の取引単位
+input string InpBase        = "USD";            // 基準の通貨
+input string InpProfit      = "JPY";            // 損益の通貨
+input string InpMargin      = "USD";            // 証拠金の通貨
+input bool   InpCfd         = false;            // true：CFD の計算（損益 = 値幅 × 取引単位 × lot。証拠金 = 値段 × 取引単位 × lot × 証拠金率）
+input double InpMarginRate  = 0.1;              // CFD の証拠金率（0.1 = 10%）
+input double InpSwapLongPct = 0.0;              // 買いのスワップ（年率 %、払いはマイナス）。買い・売りとも 0 ならスワップなし
+input double InpSwapShortPct = 0.0;             // 売りのスワップ（年率 %）
+input string InpDescription = "USDJPY (histdata.com M1)";
 
 //+------------------------------------------------------------------+
 bool SetupSymbol(void)
@@ -34,16 +45,17 @@ bool SetupSymbol(void)
         }
      }
 
-   //--- USDJPY の仕様（元銘柄が無い場合でも同じになるよう明示的に設定）
-   CustomSymbolSetString(InpSymbol, SYMBOL_CURRENCY_BASE, "USD");
-   CustomSymbolSetString(InpSymbol, SYMBOL_CURRENCY_PROFIT, "JPY");
-   CustomSymbolSetString(InpSymbol, SYMBOL_CURRENCY_MARGIN, "USD");
-   CustomSymbolSetString(InpSymbol, SYMBOL_DESCRIPTION, "USDJPY (histdata.com M1)");
-   CustomSymbolSetInteger(InpSymbol, SYMBOL_DIGITS, 3);
-   CustomSymbolSetDouble(InpSymbol, SYMBOL_POINT, 0.001);
-   CustomSymbolSetDouble(InpSymbol, SYMBOL_TRADE_TICK_SIZE, 0.001);
-   CustomSymbolSetDouble(InpSymbol, SYMBOL_TRADE_CONTRACT_SIZE, 100000.0);
-   CustomSymbolSetInteger(InpSymbol, SYMBOL_TRADE_CALC_MODE, SYMBOL_CALC_MODE_FOREX);
+   //--- 仕様（元銘柄が無い場合でも同じになるよう明示的に設定）
+   const double point = MathPow(10.0, -InpDigits);
+   CustomSymbolSetString(InpSymbol, SYMBOL_CURRENCY_BASE, InpBase);
+   CustomSymbolSetString(InpSymbol, SYMBOL_CURRENCY_PROFIT, InpProfit);
+   CustomSymbolSetString(InpSymbol, SYMBOL_CURRENCY_MARGIN, InpMargin);
+   CustomSymbolSetString(InpSymbol, SYMBOL_DESCRIPTION, InpDescription);
+   CustomSymbolSetInteger(InpSymbol, SYMBOL_DIGITS, InpDigits);
+   CustomSymbolSetDouble(InpSymbol, SYMBOL_POINT, point);
+   CustomSymbolSetDouble(InpSymbol, SYMBOL_TRADE_TICK_SIZE, point);
+   CustomSymbolSetDouble(InpSymbol, SYMBOL_TRADE_CONTRACT_SIZE, InpContract);
+   CustomSymbolSetInteger(InpSymbol, SYMBOL_TRADE_CALC_MODE, InpCfd ? SYMBOL_CALC_MODE_CFD : SYMBOL_CALC_MODE_FOREX);
    CustomSymbolSetInteger(InpSymbol, SYMBOL_TRADE_MODE, SYMBOL_TRADE_MODE_FULL);
    CustomSymbolSetInteger(InpSymbol, SYMBOL_TRADE_EXEMODE, SYMBOL_TRADE_EXECUTION_MARKET);
    CustomSymbolSetInteger(InpSymbol, SYMBOL_FILLING_MODE, SYMBOL_FILLING_FOK | SYMBOL_FILLING_IOC);
@@ -55,8 +67,22 @@ bool SetupSymbol(void)
    CustomSymbolSetInteger(InpSymbol, SYMBOL_SPREAD, InpSpreadPts);
    CustomSymbolSetInteger(InpSymbol, SYMBOL_TRADE_STOPS_LEVEL, 0);
    CustomSymbolSetInteger(InpSymbol, SYMBOL_TRADE_FREEZE_LEVEL, 0);
-   CustomSymbolSetInteger(InpSymbol, SYMBOL_SWAP_MODE, SYMBOL_SWAP_MODE_DISABLED);
+   if(InpSwapLongPct != 0.0 || InpSwapShortPct != 0.0)
+     {
+      //--- 年率（%）のスワップ。3日分が付くのは金曜（CFD の一般的な扱い）
+      CustomSymbolSetInteger(InpSymbol, SYMBOL_SWAP_MODE, SYMBOL_SWAP_MODE_INTEREST_CURRENT);
+      CustomSymbolSetDouble(InpSymbol, SYMBOL_SWAP_LONG, InpSwapLongPct);
+      CustomSymbolSetDouble(InpSymbol, SYMBOL_SWAP_SHORT, InpSwapShortPct);
+      CustomSymbolSetInteger(InpSymbol, SYMBOL_SWAP_ROLLOVER3DAYS, FRIDAY);
+     }
+   else
+      CustomSymbolSetInteger(InpSymbol, SYMBOL_SWAP_MODE, SYMBOL_SWAP_MODE_DISABLED);
    CustomSymbolSetDouble(InpSymbol, SYMBOL_MARGIN_INITIAL, 0.0);
+   if(InpCfd && InpMarginRate > 0.0)
+     {
+      CustomSymbolSetMarginRate(InpSymbol, ORDER_TYPE_BUY, InpMarginRate, InpMarginRate);
+      CustomSymbolSetMarginRate(InpSymbol, ORDER_TYPE_SELL, InpMarginRate, InpMarginRate);
+     }
 
    //--- 月〜金は終日取引可能
    for(int d = MONDAY; d <= FRIDAY; d++)

@@ -1,0 +1,20 @@
+; AdaptiveMultiStrategyEA - gold trend sleeve (entry mode 8, chapter 93). No specific days and no time-of-day habits are used for decisions.
+; For a commodity CFD account (OANDA: a separate sub-account from FX and from indices).
+; Trend (long only): hold gold while the close is above the 200-day average, reviewed every 7 days.
+; Sizing: the position's own volatility is 11.2% of equity per year (trend sleeve about 10% per year).
+; Attach to an XAUUSD chart (H1).
+InpEntryMode=8
+InpIxRevSymbols=
+InpIxTrendSymbols=XAUUSD
+InpIxRuleR2=false
+InpIxRuleD7=false
+InpIxRuleIBS=false
+InpIxRevUnitVol=0.0
+InpIxTrendUnitVol=11.2
+InpIxTrendCheckDays=7
+InpIxMaxLev=3.0
+InpIxBand=0.25
+InpIxSLVolMul=0.0
+InpIxDelayMin=5
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=80.0

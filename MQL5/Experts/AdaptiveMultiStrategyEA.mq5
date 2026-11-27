@@ -18,6 +18,7 @@
 #include <AMS\TradeFilters.mqh>
 #include <AMS\Modules.mqh>
 #include <AMS\CarryTrend.mqh>
+#include <AMS\IndexSleeves.mqh>
 
 //==================================================================
 // 入力パラメータ
@@ -186,6 +187,21 @@ input double           InpCtBand            = 0.25;        // 今の建玉と目
 input double           InpCtSLVolMul        = 6.0;         // 急変に備えた損切り：日々の値動きの何倍か（0で置かない）
 input bool             InpCtDailyExit       = false;       // 毎日の手じまい：持っているペアのトレンドが逆・急変なら、次の入れ替えを待たずに手じまう（86章）
 
+input group "=== 株価指数・金の層（方式 8、InpEntryMode=8） ==="
+input string           InpIxRevSymbols      = "US500,US100,US30";  // 売られすぎの戻り（R2・D7・IBS）を使う銘柄（カンマ区切り。空なら使わない）
+input string           InpIxTrendSymbols    = "US500,US100,US30,JP225,DE30,UK100"; // 順張り（200日の平均より上のときだけ買い）を使う銘柄（空なら使わない）
+input bool             InpIxRuleR2          = true;        // R2：200日の平均より上で RSI(2) < 10 → 買い、5日の平均を上回ったら手じまい
+input bool             InpIxRuleD7          = true;        // D7：200日の平均より上で過去7日の終値の最安値 → 買い、過去7日の最高値で手じまい
+input bool             InpIxRuleIBS         = true;        // IBS：(終値−安値)÷(高値−安値) < 0.2 → 買い、次の日足で見直す
+input double           InpIxRevUnitVol      = 2.7;         // 戻り：ルール1つ分の建玉の値動き（口座に対する年率 %。3指数×3ルールで 2.7 のとき、層の値動きは年10%ほど）
+input double           InpIxTrendUnitVol    = 2.7;         // 順張り：1銘柄の建玉の値動き（口座に対する年率 %。6指数で 2.7 のとき、層の値動きは年10%ほど）
+input int              InpIxTrendCheckDays  = 7;           // 順張りを見直す間隔（日）
+input double           InpIxMaxLev          = 4.0;         // 建玉の合計 ÷ 有効証拠金 の上限
+input double           InpIxBand            = 0.25;        // 今の建玉と目標の差がこの割合未満なら、大きさは直さない（ルールの出入りがあれば必ず直す）
+input double           InpIxSLVolMul        = 0.0;         // 急変に備えた損切り：日々の値動きの何倍か（0で置かない。公表されたルールには損切りがない）
+input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
+input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
+
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
 input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）がこれを超えたら評価値 0
@@ -196,6 +212,8 @@ input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）が
 CTrade g_trade;
 CCarryTrend g_carry;          // 方式 7（金利差＋トレンド）
 bool        g_carryMode = false;
+CIndexSleeves g_sleeves;      // 方式 8（株価指数・金の層）
+bool        g_sleevesMode = false;
 double g_weights[4][AMS_STRATEGY_COUNT];   // [REGIME][STRATEGY]
 double g_peakEquity = 0.0;
 double g_monthStartBal = 0.0;   // 月初の残高（月間目標の判定用）
@@ -1233,6 +1251,73 @@ int OnInit(void)
       return(INIT_SUCCEEDED);
      }
 
+   //--- 方式 8（株価指数・金の層）：銘柄ごとの売買の仕組みは使わず、日足が確定するたびに銘柄ごとの目標の建玉に合わせる
+   if(InpEntryMode == ENTRY_SLEEVES)
+     {
+      string revSyms[], trendSyms[];
+      int missing = 0;
+      for(int pass = 0; pass < 2; pass++)
+        {
+         string raw[];
+         const int cnt = StringSplit(pass == 0 ? InpIxRevSymbols : InpIxTrendSymbols, ',', raw);
+         for(int i = 0; i < cnt; i++)
+           {
+            StringTrimLeft(raw[i]);
+            StringTrimRight(raw[i]);
+            if(raw[i] == "")
+               continue;
+            const string sym = ResolveSymbol(raw[i]);
+            if(sym == "")
+              {
+               PrintFormat("[AMS] 銘柄 %s は口座に無いため除外します", raw[i]);
+               missing++;
+               continue;
+              }
+            if(pass == 0)
+              {
+               const int n = ArraySize(revSyms);
+               ArrayResize(revSyms, n + 1);
+               revSyms[n] = sym;
+              }
+            else
+              {
+               const int n = ArraySize(trendSyms);
+               ArrayResize(trendSyms, n + 1);
+               trendSyms[n] = sym;
+              }
+           }
+        }
+      if(missing > 0)
+        {
+         //--- 銘柄名は業者・口座の種類によって違う。設定を直せるように、口座にある銘柄名をログに出す
+         const int total = SymbolsTotal(false);
+         string line = "";
+         for(int i = 0; i < total && i < 400; i++)
+           {
+            line += SymbolName(i, false) + " ";
+            if((i + 1) % 25 == 0 || i == total - 1)
+              {
+               Print("[AMS] 口座にある銘柄: ", line);
+               line = "";
+              }
+           }
+        }
+      if(!g_sleeves.Init(GetPointer(g_trade), InpMagic, revSyms, trendSyms, InpIxRuleR2, InpIxRuleD7, InpIxRuleIBS, InpIxRevUnitVol,
+                         InpIxTrendUnitVol, InpIxTrendCheckDays, InpIxMaxLev, InpMaxMarginUsePct, InpIxBand, InpIxSLVolMul,
+                         InpIxDelayMin, InpIxMaxSpreadPct))
+        {
+         Print("[AMS] 指数の層：取引できる銘柄がありません");
+         return(INIT_FAILED);
+        }
+      g_sleevesMode = true;
+      g_peakEquity  = AccountInfoDouble(ACCOUNT_EQUITY);
+      g_halted      = false;
+      if(!MQLInfoInteger(MQL_TESTER) && InpUseTimer)
+         EventSetTimer(2);
+      PrintFormat("[AMS] エントリーの方式: %s", EnumToString(InpEntryMode));
+      return(INIT_SUCCEEDED);
+     }
+
    for(int i = 0; i < ArraySize(names); i++)
      {
       const string sym = ResolveSymbol(names[i]);
@@ -1456,6 +1541,11 @@ void OnTick(void)
       g_carry.OnTick();
       return;
      }
+   if(g_sleevesMode)
+     {
+      g_sleeves.OnTick();
+      return;
+     }
    ProcessAll();
   }
 
@@ -1464,6 +1554,17 @@ void OnTick(void)
 //+------------------------------------------------------------------+
 void OnTimer(void)
   {
+   if(g_sleevesMode)
+     {
+      g_sleeves.OnTick();
+      static datetime lastIxExport = 0;
+      if(TimeCurrent() - lastIxExport >= 3600)
+        {
+         lastIxExport = TimeCurrent();
+         ExportLive();
+        }
+      return;
+     }
    if(g_carryMode)
      {
       g_carry.OnTick();

@@ -35,7 +35,7 @@ if ($env:BT_SYMBOLS) { $kv['InpSymbols'] = $env:BT_SYMBOLS }
 # BT_INPUTS: 「名前=値;名前=値」で任意の入力を固定値にする
 if ($env:BT_INPUTS) {
   foreach ($item in ($env:BT_INPUTS -split ';')) {
-    if ($item -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$') { $kv[$matches[1]] = $matches[2] }
+    if ($item -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$') { $kv[$matches[1]] = $matches[2] }   # 値が空（名前=）なら、空の文字列にする
   }
 }
 $kv.Remove('InpTimeframe')   # 時間足は Period の指定に合わせる
@@ -60,6 +60,65 @@ if ($mode -eq 'optimize') {
   Write-Host "最適化モード: フォワード開始日 $fwd"
 }
 $testerInputs = "`r`n[TesterInputs]`r`n" + ($inputLines -join "`r`n")
+
+# 仮の銘柄（公開の1分足から作るカスタム銘柄）。BT_CUSTOM に、カンマ区切りで名前を入れる（例: US500_HD,US100_HD,XAU_HD）。
+#   口座に株価指数・金の CFD の銘柄がなくても、方式 8 を検証できるようにするためのもの。
+#   data\custom\<名前>.csv（ワークフローの data ジョブが histdata.com から用意する）を、スクリプト AMS_ImportHistData で取り込む。
+#   条件は実際の OANDA の CFD とは違う（目安として厳しめ）：スプレッドは固定、持ち越しのコストは一定の年率。
+#   損益は円で計算する（1 ポイント = 100 円 × lot）。建玉は口座に対する割合で決めるので、成績（%）は通貨の換算に関係しない。
+if ($env:BT_CUSTOM) {
+  $spec = @{
+    'US500_HD' = @{ Digits = 2; Spread = 100; SwapL = -3.0; SwapS = -1.0; Desc = 'S&P500 CFD (histdata.com M1)' }      # スプレッド 1.0 ポイント
+    'US100_HD' = @{ Digits = 2; Spread = 250; SwapL = -3.8; SwapS = -1.0; Desc = 'NASDAQ100 CFD (histdata.com M1)' }   # スプレッド 2.5 ポイント
+    'XAU_HD'   = @{ Digits = 2; Spread = 50;  SwapL = -4.4; SwapS = -0.5; Desc = 'Gold CFD (histdata.com M1)' }        # スプレッド 0.5 ドル
+  }
+  $chartSym = if ($env:BT_CHART_SYMBOL) { $env:BT_CHART_SYMBOL } else { 'USDJPY' }
+  New-Item -ItemType Directory -Force -Path "$dir\MQL5\Files", "$dir\MQL5\Presets" | Out-Null
+  foreach ($name in ($env:BT_CUSTOM -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+    if (-not $spec.ContainsKey($name)) { throw "未対応の仮の銘柄: $name" }
+    $csv = Join-Path $repo "data\custom\$name.csv"
+    if (-not (Test-Path $csv)) { throw "仮の銘柄のデータがありません: $csv" }
+    Copy-Item $csv "$dir\MQL5\Files\$name.csv" -Force
+    $s = $spec[$name]
+    @("InpFile=$name.csv", "InpSymbol=$name", "InpOrigin=", "InpSpreadPts=$($s.Spread)", "InpDigits=$($s.Digits)", "InpContract=100",
+      "InpBase=JPY", "InpProfit=JPY", "InpMargin=JPY", "InpCfd=true", "InpMarginRate=0.1", "InpSwapLongPct=$($s.SwapL)",
+      "InpSwapShortPct=$($s.SwapS)", "InpDescription=$($s.Desc)") | Out-File "$dir\MQL5\Presets\ams_import.set" -Encoding ascii
+    $iconf = Join-Path $dir 'ams_import.ini'
+    @"
+[Common]
+Login=$($env:MT5_LOGIN)
+Password=$($env:MT5_PASSWORD)
+Server=$($env:MT5_SERVER)
+KeepPrivate=1
+NewsEnable=0
+
+[StartUp]
+Script=AMS_ImportHistData
+ScriptParameters=ams_import.set
+Symbol=$chartSym
+Period=H1
+ShutdownTerminal=1
+"@ | Out-File -FilePath $iconf -Encoding ascii
+    Write-Host "仮の銘柄 $name を取り込みます（$([math]::Round((Get-Item $csv).Length / 1MB)) MB）"
+    try {
+      $ip = Start-Process -FilePath (Join-Path $dir 'terminal64.exe') -ArgumentList '/portable', "/config:`"$iconf`"" -PassThru
+      if (-not $ip.WaitForExit(25 * 60 * 1000)) {
+        Get-Process terminal64 -ErrorAction SilentlyContinue | Stop-Process -Force
+        throw "仮の銘柄 $name の取り込みが25分で終わりませんでした"
+      }
+    } finally {
+      Remove-Item $iconf -ErrorAction SilentlyContinue   # パスワードを含むので必ず削除
+    }
+    $done = Get-ChildItem "$dir\MQL5\Logs\*.log" -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Encoding Unicode -ErrorAction SilentlyContinue } |
+      Where-Object { $_ -match '\[AMS-Import\]' -and $_ -match [regex]::Escape($name) } | Select-Object -Last 1
+    Write-Host "取り込みの結果: $done"
+    if (-not ($done -match '完了')) {
+      Get-ChildItem "$dir\logs\*.log" -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Encoding Unicode -Tail 30 -ErrorAction SilentlyContinue | Where-Object { -not $env:MT5_LOGIN -or $_ -notmatch [regex]::Escape($env:MT5_LOGIN) } | ForEach-Object { Write-Host "[terminal] $_" } }
+      throw "仮の銘柄 $name の取り込みを確認できませんでした"
+    }
+    Remove-Item "$dir\MQL5\Files\$name.csv" -ErrorAction SilentlyContinue
+  }
+}
 Write-Host "入力の上書き:`n$($inputLines -join "`n")"
 
 $ini = @"

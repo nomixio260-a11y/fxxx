@@ -1,0 +1,23 @@
+; AdaptiveMultiStrategyEA - index sleeves (entry mode 8, chapter 93). No specific days and no time-of-day habits are used for decisions.
+; For an index CFD account (OANDA: a separate sub-account from FX). Symbol names differ by broker/account: check the log line
+; "[AMS] 口座にある銘柄" on the first run and edit the two lists below.
+; Mean reversion (long only, published rules, unchanged numbers): R2 / D7 / IBS on the three US indices.
+; Trend (long only): hold while the close is above the 200-day average, reviewed every 7 days, on six indices.
+; Sizing: each active rule adds a position whose own volatility is 2.7% of equity per year (reversion sleeve about 10% per year
+; with 3 indices x 3 rules); each trend position 2.7% (trend sleeve about 10% per year with 6 indices).
+; Attach to a chart of any symbol in the account (H1).
+InpEntryMode=8
+InpIxRevSymbols=US500,US100,US30
+InpIxTrendSymbols=US500,US100,US30,JP225,DE30,UK100
+InpIxRuleR2=true
+InpIxRuleD7=true
+InpIxRuleIBS=true
+InpIxRevUnitVol=2.7
+InpIxTrendUnitVol=2.7
+InpIxTrendCheckDays=7
+InpIxMaxLev=5.0
+InpIxBand=0.25
+InpIxSLVolMul=0.0
+InpIxDelayMin=5
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=80.0

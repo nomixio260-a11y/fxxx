@@ -61,6 +61,10 @@ on:
         description: "テスターの制限時間（分、空なら backtest=25 / optimize=80）"
         required: false
         default: ""
+      custom:
+        description: "仮の銘柄（公開の1分足から作る。カンマ区切り：US500_HD,US100_HD,XAU_HD。空なら使わない）"
+        required: false
+        default: ""
   push:
     paths:
       - "MQL5/**"
@@ -73,7 +77,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
+  # 仮の銘柄（株価指数・金の CFD の代わり）に使う公開の1分足を用意する。口座に CFD の銘柄がなくても、方式 8 を検証できるようにするため。
+  # 取得したデータはキャッシュに置き、毎回は取りにいかない（リポジトリには入れない）。
+  data:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.custom != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore cached data
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: data/custom
+          key: histdata-cfd-v1
+      - name: Fetch public M1 data (histdata.com)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p data/custom
+          bash tools/fetch_histdata.sh SPXUSD 2010 2026 data/custom/US500_HD.csv
+          bash tools/fetch_histdata.sh NSXUSD 2010 2026 data/custom/US100_HD.csv
+          bash tools/fetch_histdata.sh XAUUSD 2009 2026 data/custom/XAU_HD.csv
+          ls -la data/custom
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-data
+          path: data/custom/*.csv
+          retention-days: 2
+
   backtest:
+    needs: [data]
+    if: ${{ always() && !cancelled() && (needs.data.result == 'success' || needs.data.result == 'skipped') }}
     runs-on: windows-latest
     permissions:
       contents: write   # 手動実行の結果（1行要約）を reports/runs/ にコミットするため
@@ -98,8 +132,17 @@ jobs:
       BT_DEPOSIT: ${{ inputs.deposit }}
       BT_FORWARD: ${{ inputs.forward_date }}
       BT_TIMEOUT_MIN: ${{ inputs.timeout_min || (inputs.mode == 'optimize' && '80') || '25' }}
+      BT_CUSTOM: ${{ inputs.custom }}
+      BT_CHART_SYMBOL: ${{ vars.MT5_SYMBOL || 'USDJPY' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download custom symbol data
+        if: ${{ inputs.custom != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: custom-data
+          path: data/custom
 
       # 実運用のスクリプトが使う、ログの読み取り（tools/ci/lognew.ps1）の動作確認
       - name: Self-test log reader
@@ -170,7 +213,7 @@ jobs:
         run: |
           out="$RUNNER_TEMP/run_result.txt"
           {
-            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} deposit=${BT_DEPOSIT:-1000000} preset=${BT_PRESET:-none} inputs=${BT_INPUTS:-default}"
+            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} deposit=${BT_DEPOSIT:-1000000} preset=${BT_PRESET:-none} inputs=${BT_INPUTS:-default}${BT_CUSTOM:+ custom=${BT_CUSTOM} symbol=${BT_SYMBOL}}"
             cat reports/result_line.txt 2>/dev/null || echo "RESULT なし（テスト失敗）"
             # 月ごとの損益率（モンテカルロ分析などに使う）："MONTHLY 2015-01:+1.23,2015-02:-0.45,..."
             if [ -f reports/AMS_monthly.csv ]; then
