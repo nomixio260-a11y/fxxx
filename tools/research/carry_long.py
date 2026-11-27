@@ -55,7 +55,8 @@ def run(px, carry, cost, own_trend=None, risk_off=None, **kw):
     stress = (r.rolling(10, min_periods=8).std() / r.rolling(120, min_periods=80).std()).mean(axis=1)
     for ph in range(PH):
         w = hold_phase(w0, 5, ph)
-        raw = SL.pnl(w, px, carry, cost)
+        ws = w.mul(SL.exante_scale(w, px), axis=0)          # 建玉から見積もった値動きで、年10%にそろえる
+        raw = SL.pnl(ws, px, carry, cost)
         on = pd.Series(1.0, index=px.index)
         if own_trend:
             # 手法そのものの過去 N 日の成績（休んでいるあいだも、仮想の成績で判断する）。前日までの値だけを使う
@@ -63,9 +64,8 @@ def run(px, carry, cost, own_trend=None, risk_off=None, **kw):
         if risk_off:
             on = on * (stress.shift(1) <= risk_off).astype(float)
         if own_trend or risk_off:
-            w2 = w.mul(on, axis=0)
-            raw = SL.pnl(w2, px, carry, cost)
-        outs.append(SL.voltarget(raw))
+            raw = SL.pnl(ws.mul(on, axis=0), px, carry, cost)
+        outs.append(raw)
     return outs
 
 

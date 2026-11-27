@@ -78,7 +78,10 @@ def main():
 
     def add(key, label, entry, H, exit_mask=None):
         raw, w = run(px, carry, cost, entry, H, exit_mask)
-        r = SL.voltarget(raw)
+        # 1つのシグナルの大きさは一定（1日の値動き 1σ が口座の 0.2%）。全体の値動きは、あとから全期間の平均で年10%にそろえる
+        # （建玉のない期間があるので、直近の自分の値動きでそろえると、再開の直後に大きくなりすぎる）
+        sd = raw[raw.index >= "2000-01-01"].std() * np.sqrt(SL.ANN)
+        r = raw * (0.10 / sd) if sd > 0 else raw
         R[key] = r
         lines.append(SL.row(label, r))
         print(lines[-1], flush=True)

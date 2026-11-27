@@ -60,8 +60,31 @@ def pnl(w, px, carry, cost):
 
 
 def voltarget(r, target=0.10, cap=4.0):
+    """損益の列を、前日までの自分の値動きから年率 target にそろえる。いつも建玉を持つ組み合わせにだけ使う
+    （建玉のない期間がある手法に使うと、再開の直後に大きくなりすぎる。そういう手法には scaled_pnl を使う）。"""
     rv = r.rolling(60, min_periods=40).std().shift(1) * np.sqrt(ANN)
     return r * (target / rv).clip(0, cap).fillna(0.0)
+
+
+def exante_scale(w, px, target=0.10, cap=4.0, win=60):
+    """その日の建玉 w を、直近 win 日の各ペアの値動きに当てはめたときの値動きの大きさから、年率 target にそろえる倍率。
+    建玉がない日は 0。EA（金利差＋トレンド）の建玉の決め方と同じ考え方。"""
+    R = px.pct_change().fillna(0.0).values
+    W = w.values
+    out = np.zeros(len(w))
+    for t in range(win, len(w)):
+        wt = W[t]
+        if not wt.any():
+            continue
+        sd = (R[t - win + 1:t + 1] @ wt).std()
+        if sd > 0:
+            out[t] = min(target / (sd * np.sqrt(ANN)), cap)
+    return pd.Series(out, index=w.index)
+
+
+def scaled_pnl(w, px, carry, cost, target=0.10):
+    """建玉 w（合計1にそろえたもの）を、値動きが年率 target になる大きさにして、コスト込みの日次の損益を返す。"""
+    return pnl(w.mul(exante_scale(w, px, target), axis=0), px, carry, cost)
 
 
 def sharpe(x):
@@ -131,7 +154,7 @@ def main():
     R = {}
 
     def add(key, label, w, rb):
-        r = voltarget(pnl(hold(w, rb), px, carry, cost))
+        r = scaled_pnl(hold(w, rb), px, carry, cost)
         R[key] = r
         lines.append(row(label, r))
 

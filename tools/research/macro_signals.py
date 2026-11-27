@@ -39,7 +39,7 @@ def main():
 
     def add(key, label, sig, rb=5):
         w = SL.norm((sig / vol).fillna(0.0))
-        r = SL.voltarget(SL.pnl(SL.hold(w, rb), px, carry, cost))
+        r = SL.scaled_pnl(SL.hold(w, rb), px, carry, cost)
         R[key] = r
         lines.append(SL.row(label, r))
 
