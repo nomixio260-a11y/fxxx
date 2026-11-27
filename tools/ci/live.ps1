@@ -48,6 +48,9 @@ $end   = $sch.End
 Write-Host "開始 $($start.ToString('yyyy-MM-dd HH:mm')) UTC → 終了予定 $($end.ToString('yyyy-MM-dd HH:mm')) UTC（$($sch.Note)、プリセット $preset）"
 "LIVE_END_UTC=$($end.ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+# 注文を許すか（既定は 1。観察だけの回は LIVE_ALLOW_TRADING=0 にして、端末の側でも注文を禁止する）
+$allowTrading = if ($env:LIVE_ALLOW_TRADING -eq '0') { '0' } else { '1' }
+if ($allowTrading -eq '0') { Write-Host '観察だけの回です：端末の設定で自動売買を禁止しています（注文は出ません）' }
 $ini = @"
 [Common]
 Login=$($env:MT5_LOGIN)
@@ -57,7 +60,7 @@ KeepPrivate=1
 NewsEnable=0
 
 [Experts]
-AllowLiveTrading=1
+AllowLiveTrading=$allowTrading
 AllowDllImport=0
 Enabled=1
 Account=0

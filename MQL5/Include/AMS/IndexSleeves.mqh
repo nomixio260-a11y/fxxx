@@ -126,6 +126,9 @@ private:
    double            m_maxSpreadPct;   // スプレッドがこの割合（値段に対する %）を超えているあいだは待つ
    int               m_state[][IX_NR]; // ルールごとの状態（1 = 持つ）
    datetime          m_lastBar[];      // 最後に処理したときの、作りかけの日足の時刻
+   bool              m_reconOk[];      // 状態の復元が済んだか（日足がまだ届いていなければ、あとでやり直す）
+   datetime          m_stateBar[];     // ルールの状態に反映した、最後の確定した日足の時刻（状態の復元を使うとき）
+   bool              m_obsDone;        // 観察モード：口座と銘柄の条件を、値段が届いたあとにもう一度ログに出したか
    datetime          m_seenBar[];      // 新しい日足を見つけたときの、その日足の時刻
    datetime          m_seenAt[];       // 見つけた時刻
    datetime          m_trendCheck[];   // 順張りを最後に見直した日足の時刻
@@ -147,6 +150,7 @@ private:
    void              UpdateStates(const int i, const MqlRates &rt[], const int got, const int jStart, const bool entryOnAll,
                                   bool &changed, string &note);
    void              Reconstruct(const int i);
+   void              ObserveLog(void);
    double            RegimeValue(const string sym);
    void              ExecuteJoint(void);
    void              TradeTo(const int i, const double tl, const bool changed, const double equity, string &note);
@@ -216,6 +220,7 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_dryRun       = dryRun;
    m_firstEval    = 0;
    m_jointUp      = 0;
+   m_obsDone      = false;
    //--- ルールがそろった数の重み（「1,2,4」の形。読めないときは 1,2,3 = ルールの数に比例）
    m_ruleW[0] = 0.0;
    m_ruleW[1] = 1.0;
@@ -265,6 +270,8 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
      }
    ArrayResize(m_state, m_n);
    ArrayResize(m_lastBar, m_n);
+   ArrayResize(m_reconOk, m_n);
+   ArrayResize(m_stateBar, m_n);
    ArrayResize(m_seenBar, m_n);
    ArrayResize(m_seenAt, m_n);
    ArrayResize(m_trendCheck, m_n);
@@ -299,6 +306,8 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
       for(int r = 0; r < IX_NR; r++)
          m_state[i][r] = 0;
       m_lastBar[i] = 0;
+      m_reconOk[i] = false;
+      m_stateBar[i] = 0;
       m_seenBar[i] = 0;
       m_seenAt[i] = 0;
       m_trendCheck[i] = 0;
@@ -358,11 +367,45 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                m_warm ? "あり" : "なし",
                m_regDays > 0 ? StringFormat("あり（過去 %d 日の MAC5 の平均が %+.2f を超えたら IBS を止める）", m_regDays, m_regThr) : "なし",
                m_dryRun ? "、**観察モード（注文は出しません）**" : "");
+   if(m_dryRun)
+      ObserveLog();
    //--- 起動時に、日足の履歴からルールの状態を復元する（状態のファイルがなくても、止まっていても、同じ状態に戻る）
    if(m_warm)
       for(int i = 0; i < m_n; i++)
          Reconstruct(i);
    return(m_n > 0);
+  }
+
+//+------------------------------------------------------------------+
+//| 観察モード：口座と銘柄の条件をログに出す（実際の環境とテスターを比べる）   |
+//+------------------------------------------------------------------+
+void CIndexSleeves::ObserveLog(void)
+  {
+   PrintFormat("[AMS] 指数の層：（観察モード）口座：レバレッジ 1:%d、証拠金の方式 %d、ロスカットの水準 %.0f（方式 %d）、有効証拠金 %.0f、建玉 %d",
+               (int)AccountInfoInteger(ACCOUNT_LEVERAGE), (int)AccountInfoInteger(ACCOUNT_MARGIN_MODE), AccountInfoDouble(ACCOUNT_MARGIN_SO_SO),
+               (int)AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE), AccountInfoDouble(ACCOUNT_EQUITY), PositionsTotal());
+   for(int i = 0; i < m_n; i++)
+     {
+      MqlTick tk;
+      const bool okTick = SymbolInfoTick(m_sym[i], tk);
+      MqlRates rr[];
+      const int bars = CopyRates(m_sym[i], PERIOD_D1, 1, 3000, rr);
+      double mg = 0.0;
+      if(!OrderCalcMargin(ORDER_TYPE_BUY, m_sym[i], 1.0, SymbolInfoDouble(m_sym[i], SYMBOL_ASK), mg))
+         mg = 0.0;
+      const datetime b0 = iTime(m_sym[i], PERIOD_D1, 0);
+      PrintFormat("[AMS] 指数の層：（観察モード）%s 最小 %.2f lot・刻み %.2f・最大 %.1f、1 lot の額 %.0f・必要証拠金 %.0f（証拠金率 %.2f%%）、契約の大きさ %.2f、スワップ（方式=%d）買い %.4f / 売り %.4f、今夜のスワップ 値段の %.4f%%、作りかけの日足 %s、取引の終わり %s",
+                  m_sym[i], SymbolInfoDouble(m_sym[i], SYMBOL_VOLUME_MIN), SymbolInfoDouble(m_sym[i], SYMBOL_VOLUME_STEP), SymbolInfoDouble(m_sym[i], SYMBOL_VOLUME_MAX),
+                  NotionalPerLot(m_sym[i]), mg, NotionalPerLot(m_sym[i]) > 0.0 ? mg / NotionalPerLot(m_sym[i]) * 100.0 : 0.0,
+                  SymbolInfoDouble(m_sym[i], SYMBOL_TRADE_CONTRACT_SIZE), (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_MODE),
+                  SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_LONG), SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_SHORT), b0 > 0 ? SwapTonightPct(m_sym[i], b0) : 0.0,
+                  b0 > 0 ? TimeToString(b0, TIME_DATE | TIME_MINUTES) : "?", b0 > 0 ? TimeToString(SessionEnd(m_sym[i], b0), TIME_MINUTES) : "?");
+      PrintFormat("[AMS] 指数の層：（観察モード）%s 逆指値の最小距離 %d ポイント、注文の方式 %d、今のスプレッド %.1f ポイント（値段の %.4f%%）、確定した日足 %d 本（最初 %s）、最後の日足 %s 始 %.1f 高 %.1f 安 %.1f 終 %.1f",
+                  m_sym[i], (int)SymbolInfoInteger(m_sym[i], SYMBOL_TRADE_STOPS_LEVEL), (int)SymbolInfoInteger(m_sym[i], SYMBOL_FILLING_MODE),
+                  okTick ? (tk.ask - tk.bid) / SymbolInfoDouble(m_sym[i], SYMBOL_POINT) : 0.0, (okTick && tk.bid > 0.0) ? (tk.ask - tk.bid) / tk.bid * 100.0 : 0.0,
+                  bars, bars > 0 ? TimeToString(rr[0].time, TIME_DATE) : "?", bars > 0 ? TimeToString(rr[bars - 1].time, TIME_DATE) : "?",
+                  bars > 0 ? rr[bars - 1].open : 0.0, bars > 0 ? rr[bars - 1].high : 0.0, bars > 0 ? rr[bars - 1].low : 0.0, bars > 0 ? rr[bars - 1].close : 0.0);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -770,7 +813,7 @@ string CIndexSleeves::StateText(const int i)
 //+------------------------------------------------------------------+
 void CIndexSleeves::SaveState(void)
   {
-   if(MQLInfoInteger(MQL_TESTER))
+   if(MQLInfoInteger(MQL_TESTER) || m_dryRun)
       return;
    const int fh = FileOpen(m_stateFile, FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
    if(fh == INVALID_HANDLE)
@@ -1013,6 +1056,8 @@ void CIndexSleeves::Reconstruct(const int i)
       m_state[i][IX_TREND] = (rt[got - 1].close > s200 / 200.0) ? 1 : 0;
       m_trendCheck[i] = rt[got - 1].time;
      }
+   m_reconOk[i]  = true;
+   m_stateBar[i] = rt[got - 1].time;
    PrintFormat("[AMS] 指数の層：%s 状態の復元（最後の日足 %s）：%s%s%s", sym, TimeToString(rt[got - 1].time, TIME_DATE), StateText(i),
                before != StateText(i) ? "（記録では " + before + "）" : "",
                m_regDays > 0 ? (m_regVal[i] == EMPTY_VALUE ? "、前提の監視：日足が足りず計算できない（IBS は使う）"
@@ -1045,17 +1090,48 @@ bool CIndexSleeves::Evaluate(const int i, const datetime t0)
          PrintFormat("[AMS] 指数の層：%s 前提の監視 %+.3f → %s", sym, m_regVal[i], on > 0 ? "反転しやすい相場に戻った（IBS を使う）" : "続きやすい相場（IBS を止める）");
       m_regOn[i] = on;
      }
-   //--- 前回の処理のあとに確定した日足（ふつうは1本）。止まっていたあいだの分は、手じまいの条件だけを古い順に確かめる
-   int jStart = got - 1;
-   if(m_lastBar[i] > 0)
-      for(int j = got - 1; j >= 0 && j >= got - IX_REPLAY; j--)
-         if(rt[j].time >= m_lastBar[i])
-            jStart = j;
-   if(jStart < 205)
-      jStart = 205;
    bool changed = false;
    string note = "";
-   UpdateStates(i, rt, got, jStart, false, changed, note);
+   if(m_warm)
+     {
+      //--- 状態の復元を使う形：ルールの状態は、いつも「止まらずに動いていた場合」と同じにする。
+      //    まだ復元できていない（起動時に日足が届いていなかった）・2本以上の日足が抜けた（止まっていた）ときは、履歴から作り直す。
+      //    ふつうは、新しく確定した1本だけを反映する。
+      if(!m_reconOk[i] || (got >= 2 && rt[got - 2].time > m_stateBar[i]))
+        {
+         const string before = StateText(i);
+         const bool   first  = !m_reconOk[i];
+         m_reconOk[i] = false;
+         Reconstruct(i);
+         if(!m_reconOk[i])
+           {
+            Warn(i, "日足の履歴がまだそろわないため、状態を復元できません（そろうまで待ちます）");
+            return(false);
+           }
+         if(!first && before != StateText(i))
+           {
+            changed = true;
+            note += " （止まっていたあいだの日足から、状態を作り直した）";
+           }
+        }
+      if(rt[got - 1].time > m_stateBar[i])
+        {
+         UpdateStates(i, rt, got, got - 1, false, changed, note);
+         m_stateBar[i] = rt[got - 1].time;
+        }
+     }
+   else
+     {
+      //--- 前回の処理のあとに確定した日足（ふつうは1本）。止まっていたあいだの分は、手じまいの条件だけを古い順に確かめる
+      int jStart = got - 1;
+      if(m_lastBar[i] > 0)
+         for(int j = got - 1; j >= 0 && j >= got - IX_REPLAY; j--)
+            if(rt[j].time >= m_lastBar[i])
+               jStart = j;
+      if(jStart < 205)
+         jStart = 205;
+      UpdateStates(i, rt, got, jStart, false, changed, note);
+     }
    //--- 翌日の値動きの大きさの見積もり（1日の標準偏差）
    double dailyVol = 0.0;
    if(m_volModel == 1)
@@ -1217,9 +1293,13 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
    //--- 逆指値を、今の値段から置き直す（持っている建玉すべて）
    if(tl > 0.0)
       ApplyStops(sym, dailyVol);
-   if(changed || note != "")
+   if(changed || note != "" || m_dryRun)
       PrintFormat("[AMS] 指数の層：%s%s → 持つルール：%s、目標 %.2f lot（額 %.0f、値動きの見積もり 年 %.1f%%%s）", sym, note, StateText(i), tl, tgt,
                   annVol * 100.0, vixNote == "" ? "" : "、" + vixNote);
+   if(m_dryRun)
+      PrintFormat("[AMS] 指数の層：（観察モード）%s 有効証拠金 %.0f、目標の割合 %.4f、切り捨てる前の目標 %.4f lot、1 lot の額 %.0f、1日の値動きの見積もり %.4f%%、前提の監視 %s、今の建玉 %.2f lot",
+                  sym, equity, m_evFrac[i], want, npl, dailyVol * 100.0,
+                  (m_regDays > 0 && m_regVal[i] != EMPTY_VALUE) ? StringFormat("%+.4f", m_regVal[i]) : "なし", cur);
    return(true);
   }
 
@@ -1545,9 +1625,13 @@ void CIndexSleeves::ExecuteJoint(void)
          note += StringFormat(" （目標 %.3f lot が最小の取引単位 %.2f lot に届かないため、持たない）", xs[i], SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN));
       m_tgtLots[i] = tl[i];
       TradeTo(i, tl[i], anyChanged, equity, note);
-      if(m_evChanged[i] || note != "")
+      if(m_evChanged[i] || note != "" || m_dryRun)
          PrintFormat("[AMS] 指数の層：%s%s → 持つルール：%s、目標 %.2f lot（額 %.0f、値動きの見積もり 年 %.1f%%%s）", sym, note, StateText(i), tl[i], tgt[i],
                      m_evAnnVol[i] * 100.0, m_evVix[i] == "" ? "" : "、" + m_evVix[i]);
+      if(m_dryRun)
+         PrintFormat("[AMS] 指数の層：（観察モード）%s 有効証拠金 %.0f、目標の割合 %.4f、切り捨てる前の目標 %.4f lot、1 lot の額 %.0f、1日の値動きの見積もり %.4f%%、前提の監視 %s",
+                     sym, equity, m_evFrac[i], xs[i], npl[i], m_dvol[i] * 100.0,
+                     (m_regDays > 0 && m_regVal[i] != EMPTY_VALUE) ? StringFormat("%+.4f", m_regVal[i]) : "なし");
       m_lastBar[i] = m_evalBar[i];
      }
   }
@@ -1618,7 +1702,15 @@ void CIndexSleeves::OnTick(void)
       saved = true;
      }
    if(saved)
+     {
+      //--- 観察モード：値段と日足が届いたあとの条件を、もう一度だけログに出す（起動直後は届いていないことがある）
+      if(m_dryRun && !m_obsDone)
+        {
+         m_obsDone = true;
+         ObserveLog();
+        }
       SaveState();
+     }
   }
 
 #endif // AMS_INDEXSLEEVES_MQH

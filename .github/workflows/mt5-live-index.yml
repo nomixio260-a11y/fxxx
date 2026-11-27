@@ -26,6 +26,10 @@ on:
         description: "終わる前に次の回を起動して続けるか（true / false）"
         required: false
         default: "true"
+      trading:
+        description: "注文を許すか（false = 観察だけ。端末の設定で自動売買を禁止し、注文は一切出ない）"
+        required: false
+        default: "true"
 
 concurrency:
   group: mt5-live-index
@@ -48,6 +52,7 @@ jobs:
       LIVE_SYMBOL: US500
       LIVE_OUT_DIR: reports\live_index
       LIVE_ENABLED: ${{ vars.LIVE_IX_ENABLED || 'true' }}
+      LIVE_ALLOW_TRADING: ${{ (inputs.trading || 'true') == 'false' && '0' || '1' }}
       PYTHONIOENCODING: utf-8
     steps:
       - name: Stop if disabled
@@ -94,7 +99,7 @@ jobs:
         run: ./tools/ci/live.ps1
 
       - name: Save EA state
-        if: always()
+        if: ${{ always() && (inputs.trading || 'true') != 'false' }}
         uses: actions/cache/save@v4
         with:
           path: ~/AppData/Roaming/MetaQuotes/Terminal/Common/Files
