@@ -23,6 +23,12 @@ ALL = {"US500_HD": ("SPXUSD", 1.0, -3.0), "US100_HD": ("NSXUSD", 2.5, -3.8), "XA
 SYMS = {k: ALL[k] for k in ("US500_HD", "US100_HD")}
 TREND_DAYS = 7
 CONTRACT, STEP, BAND, DELAY_MIN = 100.0, 0.01, 0.25, 5
+# OANDA の株価指数 CFD の条件で計算するとき（環境変数 AMS_OANDA=1）：1 lot = 指数 × 1ドル、最小の取引単位と刻みは銘柄ごと、
+# スプレッドは S&P500 0.6・NASDAQ100 2.5 ポイント、買いの持ち越しは 年 -4.79%（実行624 で確かめた値）。円への換算は、その日の USDJPY。
+OANDA = os.environ.get("AMS_OANDA") == "1"
+LOTS = {"US500_HD": (1.0, 0.01), "US100_HD": (0.1, 0.1)}        # 最小の取引単位, 刻み
+if OANDA:
+    ALL = {"US500_HD": ("SPXUSD", 0.6, -4.79), "US100_HD": ("NSXUSD", 2.5, -4.79), "XAU_HD": ("XAUUSD", 0.5, -4.4)}
 
 
 def server_m1(pair):
@@ -75,7 +81,13 @@ def main():
         VOL[s] = (ret.rolling(60).std() * np.sqrt(252)).clip(lower=0.025)
         ABOVE[s] = (d["close"] > d["close"].rolling(200).mean()).astype(float)
         OK[s] = d["close"].rolling(215).count() >= 215          # EA は、確定した日足が215本以上になってから判定する
+    if OANDA:
+        import fred_data as F
+        uj = F.fetch("DEXJPUS").dropna()
     days = sorted(set().union(*[set(D[s].index) for s in SYMS]))
+    if OANDA:
+        uj = uj.reindex(uj.index.union(days)).ffill().reindex(days)
+    worst_day = 0.0
     days = [x for x in days if pd.Timestamp(start) <= x <= pd.Timestamp(end)]
     cash = deposit
     units = {s: 0.0 for s in SYMS}
@@ -124,19 +136,27 @@ def main():
                     pq = D[q].loc[day, "px"] if day in D[q].index and not np.isnan(D[q].loc[day, "px"]) else last_close[q]
                     eq += units[q] * pq
             tgt = eq * (n * unit + trend[s] * tunit) / 100.0 / vol
-            lots = np.floor(tgt / (bid * CONTRACT) / STEP + 1e-9) * STEP
-            cur = units[s] / CONTRACT
+            if OANDA:
+                CONTRACT_ = float(uj.loc[day])                     # 1 lot = 指数 × 1ドル → 円では 指数 × USDJPY
+                mn, st = LOTS.get(s, (0.01, 0.01))
+                lots = np.floor(tgt / (bid * CONTRACT_) / st + 1e-9) * st
+                if lots < mn:
+                    lots = 0.0
+            else:
+                CONTRACT_ = CONTRACT
+                lots = np.floor(tgt / (bid * CONTRACT_) / STEP + 1e-9) * STEP
+            cur = units[s] / CONTRACT_
             if lots <= 0:
                 if cur > 0:
                     cash += units[s] * bid
                     units[s] = 0.0
             elif chg or abs(cur - lots) > BAND * max(cur, lots):
                 if lots > cur:
-                    cash -= (lots - cur) * CONTRACT * (bid + spread)
+                    cash -= (lots - cur) * CONTRACT_ * (bid + spread)
                     trades += 1
                 elif cur > lots:
-                    cash += (cur - lots) * CONTRACT * bid
-                units[s] = lots * CONTRACT
+                    cash += (cur - lots) * CONTRACT_ * bid
+                units[s] = lots * CONTRACT_
         for s in SYMS:
             if day in D[s].index:
                 last_close[s] = D[s].loc[day, "close"]
@@ -154,6 +174,7 @@ def main():
     print(f"最終の有効証拠金 {eq.iloc[-1]:,.0f} 円（損益 {eq.iloc[-1] - deposit:+,.0f} 円、{(eq.iloc[-1] / deposit - 1) * 100:+.1f}%）、買いの注文 {trades} 回、"
           f"最大の下落（日次の終値）{dd:.1f}%、年率シャープ {dr.mean() / dr.std() * np.sqrt(252):+.2f}、値動き 年{dr.std() * np.sqrt(252) * 100:.1f}%")
     print("年ごと（%）：" + "、".join(f"{k.year}年 {v:+.1f}" for k, v in yret.items()))
+    print(f"最悪の日 {dr.min() * 100:+.1f}%（{dr.idxmin().date()}）、最悪の月 {mret.min():+.1f}%（{mret.idxmin().strftime('%Y-%m')}）、最悪の年 {yret.min():+.1f}%")
     print("MONTHLY " + ",".join(f"{k.strftime('%Y-%m')}:{v:.2f}" for k, v in mret.items()))
 
 

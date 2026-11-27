@@ -4,6 +4,7 @@
 #   LIVE_MINUTES  この回で動かす最大の分数（既定 330）
 #   LIVE_PRESET   使うプリセット（MQL5\Presets のファイル名、既定 AMS_Calendar_Portfolio.set）
 #   LIVE_SYMBOL   EA を付けるチャートの銘柄（既定 USDJPY）
+#   LIVE_OUT_DIR  成績の置き場所（既定 reports\live）
 $ErrorActionPreference = 'Stop'
 $dir    = $env:MT5_DIR
 $repo   = $env:GITHUB_WORKSPACE
@@ -11,7 +12,8 @@ $runMin = if ($env:LIVE_MINUTES) { [int]$env:LIVE_MINUTES } else { 330 }
 $preset = if ($env:LIVE_PRESET) { $env:LIVE_PRESET } else { 'AMS_Calendar_Portfolio.set' }
 $symbol = if ($env:LIVE_SYMBOL) { $env:LIVE_SYMBOL } else { 'USDJPY' }
 $common = Join-Path $env:APPDATA 'MetaQuotes\Terminal\Common\Files'
-$outDir = Join-Path $repo 'reports\live'
+# 成績の置き場所（口座ごとに分ける。既定は為替の口座の reports\live、株価指数の口座は reports\live_index）
+$outDir = Join-Path $repo $(if ($env:LIVE_OUT_DIR) { $env:LIVE_OUT_DIR } else { 'reports\live' })
 New-Item -ItemType Directory -Force -Path "$dir\MQL5\Presets", $common, $outDir | Out-Null
 Copy-Item "$repo\MQL5\Presets\*.set" "$dir\MQL5\Presets\" -Force
 

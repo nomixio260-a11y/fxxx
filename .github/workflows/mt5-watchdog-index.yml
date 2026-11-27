@@ -1,0 +1,50 @@
+name: MT5 Live Index watchdog
+
+# 株価指数の口座のデモ運用（mt5-live-index.yml）が止まっていないかを見張る（為替用の mt5-watchdog.yml と同じ作り）。
+# - mt5-live-index.yml は、各回が次の回を起動してつなぐ作りのため、1回の失敗の重なりでつなぎが切れることがある
+#   （2026年11月22日：MT5 の配布元が落ち、4回続けて失敗して、5日間止まった）。
+# - この見張り役は、約5時間半ずつ動き、5分ごとに mt5-live-index.yml の回があるかを確かめる。15分続けて1つもなければ、起動する。
+# - 見張り役も、各回の始めに次の回を予約してつなぐ。mt5-live-index.yml の側も、見張り役が動いていなければ起動する（お互いに見張る）。
+# - 止めるには：リポジトリの変数 LIVE_IX_ENABLED=false を作る（mt5-live-index.yml と共通）。または、Actions の画面で両方を Cancel する。
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mt5-watchdog-index
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      LIVE_ENABLED: ${{ vars.LIVE_IX_ENABLED || 'true' }}
+    steps:
+      - name: Stop if disabled
+        if: env.LIVE_ENABLED == 'false'
+        run: echo "LIVE_IX_ENABLED=false のため、見張り役も止まっています。" && exit 1
+
+      - name: Queue the next watchdog
+        run: gh workflow run mt5-watchdog-index.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" && echo "次の見張り役を予約しました"
+
+      - name: Watch the live runs
+        run: |
+          end=$(( $(date +%s) + 320 * 60 ))
+          miss=0
+          while [ "$(date +%s)" -lt "$end" ]; do
+            n=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow mt5-live-index.yml --branch "$GITHUB_REF_NAME" --limit 10 --json status \
+                  --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo -1)
+            if [ "$n" = "0" ]; then miss=$((miss + 1)); else miss=0; fi
+            if [ "$miss" -ge 3 ]; then
+              echo "$(date -u +%FT%TZ) デモ口座の運用の回がありません。起動します"
+              gh workflow run mt5-live-index.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f chain=true || true
+              miss=0
+              sleep 600
+            fi
+            sleep 300
+          done
+          echo "見張りの回を終えます（次の回に引き継ぎます）"

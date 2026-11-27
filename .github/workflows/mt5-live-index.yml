@@ -1,0 +1,137 @@
+name: MT5 Live Index (OANDA demo, index CFD)
+
+# OANDA の株価指数 CFD のデモ口座（為替とは別のサブアカウント）で、EA の方式 8（指数の層）を実際に動かす。
+# 為替の口座用の mt5-live.yml と同じ作り。口座・状態の保存先・成績の置き場所（reports/live_index）だけが違う。
+# - 1回あたり最大約5.5時間動かす。各回の始めに次の回を予約し（前の回が終わるまで待つ）、途切れずにつなぐ。
+#   回を終える時刻は tools/ci/schedule.ps1 で決める（取引の時間帯の途中で入れ替えない・UTC 4:00 ごろの停止を避ける）。
+#   （スケジュール起動は既定のブランチでしか動かないため、この方式にしている）
+# - 前の回が終わるまで、次の回は待つ（同じ口座で2つの MT5 が同時に注文しないように）。
+# - 止めるには：リポジトリの変数（Settings → Secrets and variables → Actions → Variables）に
+#   LIVE_IX_ENABLED=false を作る。実行中の回は Actions の画面から Cancel できる。
+# - 状態（自動調整の記録・月初の残高など）は、キャッシュで次の回に引き継ぐ。
+# - 成績は reports/live_index/summary.md にまとめて、このブランチにコミットする。
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "この回で動かす最大の分数（既定 330）"
+        required: false
+        default: "330"
+      preset:
+        description: "使うプリセット（MQL5/Presets のファイル名）"
+        required: false
+        default: "AMS_Sleeves_Index.set"
+      chain:
+        description: "終わる前に次の回を起動して続けるか（true / false）"
+        required: false
+        default: "true"
+
+concurrency:
+  group: mt5-live-index
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: windows-latest
+    timeout-minutes: 380
+    permissions:
+      contents: write   # 成績を reports/live にコミットするため
+      actions: write    # 次の回を起動するため
+    env:
+      MT5_LOGIN: ${{ secrets.MT5_IX_LOGIN }}
+      MT5_PASSWORD: ${{ secrets.MT5_IX_PASSWORD }}
+      MT5_SERVER: ${{ secrets.MT5_IX_SERVER }}
+      MT5_INSTALLER_URL: ${{ vars.MT5_INSTALLER_URL || 'https://download.mql5.com/cdn/web/oanda.corporation/mt5/oanda5setup.exe' }}
+      LIVE_MINUTES: ${{ inputs.minutes || '330' }}
+      LIVE_PRESET: ${{ inputs.preset || 'AMS_Sleeves_Index.set' }}
+      LIVE_SYMBOL: US500
+      LIVE_OUT_DIR: reports\live_index
+      LIVE_ENABLED: ${{ vars.LIVE_IX_ENABLED || 'true' }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Stop if disabled
+        if: env.LIVE_ENABLED == 'false'
+        run: echo "LIVE_IX_ENABLED=false のため、株価指数の口座の運用は止まっています。" && exit 1
+        shell: bash
+
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5
+        shell: pwsh
+        run: ./tools/ci/install_mt5.ps1
+
+      - name: Compile EA (0 errors / 0 warnings)
+        shell: pwsh
+        run: ./tools/ci/compile.ps1
+
+      - name: Restore EA state
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/AppData/Roaming/MetaQuotes/Terminal/Common/Files
+          key: mt5-live-index-state-${{ github.run_id }}
+          restore-keys: mt5-live-index-state-
+
+      # 次の回を、この回の始めに予約しておく。concurrency（mt5-live-index）のため、次の回はこの回が終わるまで待ち、
+      # 終わると始まる。GitHub のサーバーが途中で落ちて、最後の手順まで進まなかった場合も、つなぎが切れない。
+      # （2026年11月15日に、サーバーが落ちて引き継ぎが途切れたための対策）
+      - name: Queue the next run
+        if: ${{ (inputs.chain || 'true') == 'true' && env.LIVE_ENABLED != 'false' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run mt5-live-index.yml --ref "$GITHUB_REF_NAME" \
+            -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を予約しました（この回が終わると始まります）"
+          # 見張り役（mt5-watchdog-index.yml）が動いていなければ、起動しておく（お互いに見張る）
+          w=$(gh run list --workflow mt5-watchdog-index.yml --branch "$GITHUB_REF_NAME" --limit 5 --json status \
+                --jq '[.[] | select(.status != "completed")] | length' || echo 1)
+          if [ "${w:-1}" = "0" ]; then gh workflow run mt5-watchdog-index.yml --ref "$GITHUB_REF_NAME" && echo "見張り役を起動しました" || true; fi
+
+      - name: Run EA on the demo account
+        id: runea
+        shell: pwsh
+        run: ./tools/ci/live.ps1
+
+      - name: Save EA state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/AppData/Roaming/MetaQuotes/Terminal/Common/Files
+          key: mt5-live-index-state-${{ github.run_id }}
+
+      - name: Start the next run
+        if: ${{ !cancelled() && (inputs.chain || 'true') == 'true' && env.LIVE_ENABLED != 'false' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 始めに予約した次の回が待っていれば、何もしない（予約に失敗していたときだけ、ここで起動する）。
+          # 「この回より後に作られて、まだ終わっていない回」だけを数える（2026年11月22日、終わったばかりの前の回を
+          # 待っている回と数えてしまい、つなぎが切れたため）。
+          n=$(gh run list --workflow mt5-live-index.yml --branch "$GITHUB_REF_NAME" --limit 20 --json status,number \
+                --jq "[.[] | select(.number > ${GITHUB_RUN_NUMBER} and .status != \"completed\")] | length" || echo 0)
+          if [ "${n:-0}" -gt 0 ]; then echo "次の回は予約済みです"; exit 0; fi
+          # EA を動かす前に失敗した回（インストールの失敗など）は、すぐにやり直すと失敗を繰り返すので、5分待つ
+          if [ "${{ steps.runea.outcome }}" != "success" ]; then echo "EA を動かす前に失敗したため、5分待ってから次の回を起動します"; sleep 300; fi
+          gh workflow run mt5-live-index.yml --ref "$GITHUB_REF_NAME" \
+            -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を起動しました"
+
+      - name: Save results to repository
+        if: always()
+        shell: bash
+        run: |
+          python tools/live_summary.py reports/live_index || true
+          tmp="$RUNNER_TEMP/live"; rm -rf "$tmp"; cp -r reports/live_index "$tmp" 2>/dev/null || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5 6 7 8; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard FETCH_HEAD
+            mkdir -p reports/live_index && cp -r "$tmp"/. reports/live_index/
+            git add reports/live_index
+            git diff --cached --quiet && { echo "変更なし"; exit 0; }
+            git commit -q -m "live-index: results ${GITHUB_RUN_NUMBER} [skip ci]"
+            if git push -q origin HEAD:"$GITHUB_REF_NAME"; then echo "saved"; exit 0; fi
+            sleep $((i * 5))
+          done
