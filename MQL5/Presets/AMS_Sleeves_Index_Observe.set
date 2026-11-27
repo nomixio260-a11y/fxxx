@@ -29,4 +29,5 @@ InpIxJointEps=0.25
 InpIxWarmStart=true
 InpIxRegimeDays=750
 InpIxRegimeThr=0.02
+InpIxRegimeRef=US500
 InpIxDryRun=true

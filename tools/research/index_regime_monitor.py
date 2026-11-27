@@ -27,7 +27,7 @@ import yahoo_data as Y  # noqa: E402
 ANN = 252
 W124 = {0: 0.0, 1: 0.25, 2: 0.5, 3: 1.0}
 ERAS = (("1962〜81", "1962-07-01", "1982-01-01"), ("1982〜98", "1982-01-01", "1999-01-01"), ("1999〜2010", "1999-01-01", "2011-01-01"),
-        ("2011〜26", "2011-01-01", "2027-01-01"))
+        ("2011〜26", "2011-01-01", "2027-01-01"), ("うち 2023年11月〜", "2023-11-01", "2027-01-01"))
 
 
 def sh(x):
@@ -64,11 +64,16 @@ def main():
                      + f" | {(x[x.index >= '1999-01-01'] > 0).mean() * 100:.0f}% |")
         print(lines[-1], flush=True)
 
-    def run(names, which, W, thr):
+    def run(names, which, W, thr, ref=None):
         parts = []
         for name in names:
             d, st, rate, div, sg, rk = data[name]
-            on = pd.Series(1.0, index=d.index) if W is None else (mon[name][W] < thr).astype(float).where(mon[name][W].notna(), 1.0)
+            if W is None:
+                on = pd.Series(1.0, index=d.index)
+            else:
+                # ref があれば、その指数の監視の値を、すべての指数に使う（市場全体の性質として1つの値で判定する）
+                mm = mon[name][W] if ref is None else mon[ref][W].reindex(mon[ref][W].index.union(d.index)).ffill().reindex(d.index)
+                on = (mm <= thr).astype(float).where(mm.notna(), 1.0)
             r2, d7, ibs = st["R2<10"], st["D7"], st["IBS"]
             if which == "all":
                 n = (r2 + d7 + ibs) * on
@@ -82,14 +87,17 @@ def main():
         return pd.concat(parts, axis=1, sort=True).fillna(0.0).sum(axis=1)
     for title, names, start in (("S&P500 だけ（1962年7月〜）", ["S&P500"], "1962-07-01"), ("3指数（そろう時期から。1992年〜はすべて）", ["S&P500", "NASDAQ100", "ダウ"], "1962-07-01")):
         lines += ["", f"## {title}", "", "| 形 | 全期間のシャープ | " + " | ".join(e[0] for e in ERAS) + " | 最悪の日 | 最大の下落 | 止めていた日の割合（1999年〜） |", "|---|" + "---|" * (len(ERAS) + 4)]
-        for label, which, W, thr in (("監視なし（99章の形）", "none", None, 0.0), ("3つのルールすべてを止める：過去 750 日", "all", 750, 0.0), ("IBS だけを止める：過去 500 日", "ibs", 500, 0.0),
-                                     ("**IBS だけを止める：過去 750 日**", "ibs", 750, 0.0), ("IBS だけを止める：過去 1000 日", "ibs", 1000, 0.0),
-                                     ("IBS だけを止める：過去 750 日・+0.02 を超えたら", "ibs", 750, 0.02)):
-            r = run(names, which, W, thr)
+        for label, which, W, thr, ref in (("監視なし（99章の形）", "none", None, 0.0, None), ("3つのルールすべてを止める：過去 750 日", "all", 750, 0.0, None),
+                                     ("IBS だけを止める：過去 500 日", "ibs", 500, 0.0, None),
+                                     ("IBS だけを止める：過去 750 日", "ibs", 750, 0.0, None), ("IBS だけを止める：過去 1000 日", "ibs", 1000, 0.0, None),
+                                     ("IBS だけを止める：過去 750 日・+0.02 を超えたら", "ibs", 750, 0.02, None),
+                                     ("S&P500 の値で、すべての指数を判定：過去 750 日・0 を超えたら", "ibs", 750, 0.0, "S&P500"),
+                                     ("**S&P500 の値で、すべての指数を判定：過去 750 日・+0.02 を超えたら**", "ibs", 750, 0.02, "S&P500")):
+            r = run(names, which, W, thr, ref)
             r = r[r.index >= start]
             z = r * (0.10 / (r.std() * np.sqrt(ANN)))
             eq = (1 + z).cumprod()
-            off = "—" if W is None else f"{np.mean([(mon[n][W][mon[n][W].index >= '1999-01-01'] >= thr).mean() for n in names]) * 100:.0f}%"
+            off = "—" if W is None else f"{np.mean([(mon[ref or n][W][mon[ref or n][W].index >= '1999-01-01'] > thr).mean() for n in names]) * 100:.0f}%"
             lines.append(f"| {label} | {sh(z):+.2f} | " + " | ".join(f"{sh(z[(z.index >= a) & (z.index < b)]):+.2f}" for _, a, b in ERAS)
                          + f" | {z.min() * 100:.1f}% | {(eq / eq.cummax() - 1).min() * 100:.0f}% | {off} |")
             print(lines[-1], flush=True)

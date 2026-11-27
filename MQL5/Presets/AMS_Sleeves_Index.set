@@ -1,4 +1,4 @@
-; AdaptiveMultiStrategyEA - index mean-reversion sleeve (entry mode 8, chapters 93, 97, 98 and 99).
+; AdaptiveMultiStrategyEA - index mean-reversion sleeve (entry mode 8, chapters 93, 97, 98, 99 and 100).
 ; No specific days and no time-of-day habits are used for decisions.
 ; For an index CFD account (OANDA: a separate sub-account from FX). Symbol names differ by broker/account: check the log line
 ; "[AMS] 口座にある銘柄" on the first run and edit the list below.
@@ -13,6 +13,15 @@
 ;     the margin level stays above the broker's stop-out level.
 ; InpIxRevUnitVol decides how much is risked. Verified on the index account (last 3 years, 500,000 JPY, real ticks: chapter 99):
 ;   7.5 = cautious, 8.75 = middle (this file), 10-12.5 = aggressive (drawdowns of 22-29%); 15 and above gave less profit with deeper drawdowns.
+; Robustness (chapter 100):
+;   - InpIxWarmStart=true: rule states are rebuilt from daily bars at start and after missed days, so a restart or an outage
+;     gives the same states as an uninterrupted run;
+;   - premise monitor (InpIxRegimeDays=750, InpIxRegimeThr=0.02, InpIxRegimeRef=US500): the reversion rules rely on index returns
+;     reversing from day to day (true since about 1999). If the 750-day average of MAC5 of US500 rises above +0.02
+;     (returns tend to continue), IBS - the rule without the 200-day filter - is switched off for all symbols. Since 1999 it has
+;     never triggered, so it costs nothing in the tests; before 1999 it halved the worst drawdown;
+;   - InpIxJointRound=false: lots are floored per symbol. Joint rounding (true) holds positions more often on a small account,
+;     but with real ticks it earned less for the same drawdown, so it is left as an option.
 ; Swap avoidance (InpIxFlatMinutes) is off: its saving was small and the real-tick results were mixed (chapter 99).
 ; The trend sleeve is off: on index CFDs it adds nothing on top of the reversion sleeve (chapter 96).
 ; Attach to a chart of any symbol in the account (H1).
@@ -39,3 +48,10 @@ InpIxFlatEdgeBp=0.0
 InpIxDelayMin=5
 InpIxMaxSpreadPct=0.05
 InpMaxMarginUsePct=90.0
+InpIxJointRound=false
+InpIxJointEps=0.25
+InpIxWarmStart=true
+InpIxRegimeDays=750
+InpIxRegimeThr=0.02
+InpIxRegimeRef=US500
+InpIxDryRun=false
