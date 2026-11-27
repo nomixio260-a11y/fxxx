@@ -135,6 +135,8 @@ private:
    bool              m_reconOk[];      // 状態の復元が済んだか（日足がまだ届いていなければ、あとでやり直す）
    datetime          m_stateBar[];     // ルールの状態に反映した、最後の確定した日足の時刻（状態の復元を使うとき）
    bool              m_obsDone;        // 観察モード：口座と銘柄の条件を、値段が届いたあとにもう一度ログに出したか
+   bool              m_riskRestored;   // 起動時：いま持っている建玉と値動きの見積もりを、上限の計算に反映し終えたか
+   bool              m_posSeen[];      // 起動時：その銘柄の、いまの建玉を確かめたか
    datetime          m_seenBar[];      // 新しい日足を見つけたときの、その日足の時刻
    datetime          m_seenAt[];       // 見つけた時刻
    datetime          m_trendCheck[];   // 順張りを最後に見直した日足の時刻
@@ -159,6 +161,7 @@ private:
    void              Reconstruct(const int i);
    void              ObserveLog(void);
    void              ObserveHistory(const int i, const int days);
+   void              RestoreRisk(void);
    double            DailyVol(const MqlRates &rt[], const int got);
    double            RegimeValue(const string sym);
    void              ExecuteJoint(void);
@@ -233,6 +236,7 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_firstEval    = 0;
    m_jointUp      = 0;
    m_obsDone      = false;
+   m_riskRestored = false;
    //--- ルールがそろった数の重み（「1,2,4」の形。読めないときは 1,2,3 = ルールの数に比例）
    m_ruleW[0] = 0.0;
    m_ruleW[1] = 1.0;
@@ -283,6 +287,7 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    ArrayResize(m_state, m_n);
    ArrayResize(m_lastBar, m_n);
    ArrayResize(m_reconOk, m_n);
+   ArrayResize(m_posSeen, m_n);
    ArrayResize(m_stateBar, m_n);
    ArrayResize(m_seenBar, m_n);
    ArrayResize(m_seenAt, m_n);
@@ -321,6 +326,7 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
          m_state[i][r] = 0;
       m_lastBar[i] = 0;
       m_reconOk[i] = false;
+      m_posSeen[i] = false;
       m_stateBar[i] = 0;
       m_seenBar[i] = 0;
       m_seenAt[i] = 0;
@@ -397,6 +403,50 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
       for(int i = 0; i < m_n; i++)
          Reconstruct(i);
    return(m_n > 0);
+  }
+
+//+------------------------------------------------------------------+
+//| 起動時：いま持っている建玉と、値動きの見積もりを、上限の計算に反映する。  |
+//| 上限（建玉の合計・強制ロスカットを避ける上限）は、ほかの銘柄の建玉を       |
+//| 数えて決める。再起動の直後は、その記録（目標のロット・値動きの見積もり）が  |
+//| 空なので、次の日足の判定で、まだ判定していない銘柄の建玉が数に入らず、      |
+//| 上限が甘くなる。テスターでは再起動がないので、実際の運用だけで起きる違い。   |
+//| 値段と日足が届くまで、毎ティックやり直す。                              |
+//+------------------------------------------------------------------+
+void CIndexSleeves::RestoreRisk(void)
+  {
+   if(!MQLInfoInteger(MQL_TESTER) && !TerminalInfoInteger(TERMINAL_CONNECTED))
+      return;
+   bool all = true;
+   string held = "";
+   for(int i = 0; i < m_n; i++)
+     {
+      if(m_dvol[i] <= 0.0)
+        {
+         MqlRates rt[];
+         ArraySetAsSeries(rt, false);
+         const int got = CopyRates(m_sym[i], PERIOD_D1, 1, IX_BARS, rt);
+         if(got >= 215)
+            m_dvol[i] = DailyVol(rt, got);
+         else
+            all = false;
+        }
+      if(!m_posSeen[i])
+        {
+         int dir = 0;
+         const double cur = CurrentLots(m_sym[i], dir);
+         if(dir > 0 && cur > 0.0 && m_tgtLots[i] <= 0.0)
+           {
+            m_tgtLots[i] = cur;
+            held += StringFormat(" %s %.2f lot", m_sym[i], cur);
+           }
+         m_posSeen[i] = true;
+        }
+     }
+   if(held != "")
+      PrintFormat("[AMS] 指数の層：起動時に持っていた建玉を、上限の計算に反映しました：%s", held);
+   if(all)
+      m_riskRestored = true;
   }
 
 //+------------------------------------------------------------------+
@@ -1763,6 +1813,8 @@ void CIndexSleeves::OnTick(void)
    const datetime now = TimeCurrent();
    bool saved = false;
    int  waiting = 0, pending = 0;
+   if(!m_riskRestored)
+      RestoreRisk();
    for(int i = 0; i < m_n; i++)
      {
       if(m_flatMin > 0)
