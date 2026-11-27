@@ -1,0 +1,8 @@
+run=607 mode=backtest period=H1 model=1 exec=default from=2025.11.01 to=2026.11.13 symbols=default deposit=3000000 preset=AMS_CarryTrend.set inputs=default
+RESULT net=0 | pf=0.00 | trades=0 | win=0(0.00%) | dd=0%(0) | months=13 avg=+0.00% geo=+0.00% min=+0.00% max=+0.00% ge10=0 | signals:total=0,skip_spread=0,skip_other=0,skip_adapt=0,skip_monthlock=0,skip_monthstop=0 | cost:+0.0pips=+0(PF99.00),+0.5pips=+0(PF99.00),+1.0pips=+0(PF99.00),+2.0pips=+0(PF99.00)
+MONTHLY 2025-11:0.00,2025-12:0.00,2026-01:0.00,2026-02:0.00,2026-03:0.00,2026-04:0.00,2026-05:0.00,2026-06:0.00,2026-07:0.00,2026-08:0.00,2026-09:0.00,2026-10:0.00,2026-11:0.00
+SAMPLE sl_hit=0 tp_hit=0 closed_by_ea=0 stop_out=0
+CS	0	02:52:22.244	Tester	  === エントリーの方式 ====
+2025.11.01 00:00:00 [AMS] エントリーの方式: ENTRY_CARRY
+SKIPS total=0
+SKIP_REASONS
