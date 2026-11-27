@@ -65,6 +65,12 @@ on:
         description: "仮の銘柄（公開の1分足から作る。カンマ区切り：US500_HD,US100_HD,XAU_HD。空なら使わない）"
         required: false
         default: ""
+      account:
+        description: "ログインする口座（fx=為替 / index=株価指数CFD / commodity=商品CFD。index と commodity は、それぞれのシークレットが必要）"
+        required: false
+        type: choice
+        options: [fx, index, commodity]
+        default: fx
   push:
     paths:
       - "MQL5/**"
@@ -113,9 +119,12 @@ jobs:
       contents: write   # 手動実行の結果（1行要約）を reports/runs/ にコミットするため
     timeout-minutes: 120
     env:
-      MT5_LOGIN: ${{ secrets.MT5_LOGIN }}
-      MT5_PASSWORD: ${{ secrets.MT5_PASSWORD }}
-      MT5_SERVER: ${{ secrets.MT5_SERVER }}
+      # 口座の種類ごとのシークレット：為替 = MT5_LOGIN / MT5_PASSWORD / MT5_SERVER、
+      # 株価指数CFD = MT5_IX_LOGIN / MT5_IX_PASSWORD / MT5_IX_SERVER、商品CFD = MT5_CM_LOGIN / MT5_CM_PASSWORD / MT5_CM_SERVER
+      MT5_LOGIN: ${{ (inputs.account == 'index' && secrets.MT5_IX_LOGIN) || (inputs.account == 'commodity' && secrets.MT5_CM_LOGIN) || ((inputs.account == 'fx' || inputs.account == '' || inputs.account == null) && secrets.MT5_LOGIN) || '' }}
+      MT5_PASSWORD: ${{ (inputs.account == 'index' && secrets.MT5_IX_PASSWORD) || (inputs.account == 'commodity' && secrets.MT5_CM_PASSWORD) || ((inputs.account == 'fx' || inputs.account == '' || inputs.account == null) && secrets.MT5_PASSWORD) || '' }}
+      MT5_SERVER: ${{ (inputs.account == 'index' && secrets.MT5_IX_SERVER) || (inputs.account == 'commodity' && secrets.MT5_CM_SERVER) || ((inputs.account == 'fx' || inputs.account == '' || inputs.account == null) && secrets.MT5_SERVER) || '' }}
+      BT_ACCOUNT: ${{ inputs.account || 'fx' }}
       MT5_INSTALLER_URL: ${{ vars.MT5_INSTALLER_URL || 'https://download.mql5.com/cdn/web/oanda.corporation/mt5/oanda5setup.exe' }}
       PYTHONIOENCODING: utf-8
       BT_SYMBOL: ${{ inputs.symbol || vars.MT5_SYMBOL || 'USDJPY' }}
@@ -213,7 +222,7 @@ jobs:
         run: |
           out="$RUNNER_TEMP/run_result.txt"
           {
-            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} deposit=${BT_DEPOSIT:-1000000} preset=${BT_PRESET:-none} inputs=${BT_INPUTS:-default}${BT_CUSTOM:+ custom=${BT_CUSTOM} symbol=${BT_SYMBOL}}"
+            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} deposit=${BT_DEPOSIT:-1000000} preset=${BT_PRESET:-none} inputs=${BT_INPUTS:-default}${BT_CUSTOM:+ custom=${BT_CUSTOM} symbol=${BT_SYMBOL}} account=${BT_ACCOUNT:-fx}"
             cat reports/result_line.txt 2>/dev/null || echo "RESULT なし（テスト失敗）"
             # 月ごとの損益率（モンテカルロ分析などに使う）："MONTHLY 2015-01:+1.23,2015-02:-0.45,..."
             if [ -f reports/AMS_monthly.csv ]; then
