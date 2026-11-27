@@ -1,16 +1,19 @@
-; AdaptiveMultiStrategyEA - index mean-reversion sleeve (entry mode 8, chapters 93, 97 and 98).
+; AdaptiveMultiStrategyEA - index mean-reversion sleeve (entry mode 8, chapters 93, 97, 98 and 99).
 ; No specific days and no time-of-day habits are used for decisions.
 ; For an index CFD account (OANDA: a separate sub-account from FX). Symbol names differ by broker/account: check the log line
 ; "[AMS] 口座にある銘柄" on the first run and edit the list below.
 ; Signals (long only, published rules, unchanged numbers): R2 / D7 / IBS on the three US indices.
-; Sizing and loss control (chapter 98):
-;   - each active rule adds a position whose own volatility is InpIxRevUnitVol % of equity per year,
-;     using a HAR-type forecast of next-day volatility (InpIxVolModel=1);
-;   - the reversion size is multiplied by 0.5 / 1.0 / 1.5 when the VIX is in the lower / middle / upper third of its own history
+; Sizing and loss control:
+;   - position units by number of active rules: 1, 2 and 4 units for one, two and three rules (InpIxRuleWeights, chapter 99);
+;     one unit has its own volatility of InpIxRevUnitVol % of equity per year, using a HAR-type forecast of next-day volatility;
+;   - the size is multiplied by 0.5 / 1.0 / 1.5 when the VIX is in the lower / middle / upper third of its own history
 ;     (file AMS_vix.csv in the common folder, refreshed by tools/ci/fetch_vix.ps1; 1.0 when the file is missing or stale);
-;   - a stop is re-based every day at 4 x the forecast daily volatility below the price (InpIxSLVolMul=4).
-; InpIxRevUnitVol decides how much is risked. Verified on the index account (last 3 years, 500,000 JPY, real ticks: see chapter 98):
-;   7.5 = cautious, 10 = middle (this file), 12.5-15 = aggressive (drawdowns of 30-40%); 17.5 and above was stopped out.
+;   - a stop is re-based every day at 4 x the forecast daily volatility below the price (InpIxSLVolMul=4);
+;   - stop-out guard (InpIxSoGuard=0.9, chapter 99): total positions are capped so that even if every stop is hit,
+;     the margin level stays above the broker's stop-out level.
+; InpIxRevUnitVol decides how much is risked. Verified on the index account (last 3 years, 500,000 JPY, real ticks: chapter 99):
+;   7.5 = cautious, 8.75 = middle (this file), 10-12.5 = aggressive (drawdowns of 22-29%); 15 and above gave less profit with deeper drawdowns.
+; Swap avoidance (InpIxFlatMinutes) is off: its saving was small and the real-tick results were mixed (chapter 99).
 ; The trend sleeve is off: on index CFDs it adds nothing on top of the reversion sleeve (chapter 96).
 ; Attach to a chart of any symbol in the account (H1).
 InpEntryMode=8
@@ -19,7 +22,7 @@ InpIxTrendSymbols=none
 InpIxRuleR2=true
 InpIxRuleD7=true
 InpIxRuleIBS=true
-InpIxRevUnitVol=10.0
+InpIxRevUnitVol=8.75
 InpIxTrendUnitVol=0.0
 InpIxTrendCheckDays=7
 InpIxMaxLev=10.0
@@ -29,6 +32,10 @@ InpIxVolModel=1
 InpIxVixFile=AMS_vix.csv
 InpIxVixLowMult=0.5
 InpIxVixHighMult=1.5
+InpIxRuleWeights=1,2,4
+InpIxSoGuard=0.9
+InpIxFlatMinutes=0
+InpIxFlatEdgeBp=0.0
 InpIxDelayMin=5
 InpIxMaxSpreadPct=0.05
 InpMaxMarginUsePct=90.0
