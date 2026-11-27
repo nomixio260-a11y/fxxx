@@ -174,7 +174,7 @@ private:
    bool              Evaluate(const int i, const datetime t0);
    void              UpdateStates(const int i, const MqlRates &rt[], const int got, const int jStart, const bool entryOnAll,
                                   bool &changed, string &note);
-   void              Reconstruct(const int i);
+   void              Reconstruct(const int i, const bool upToProcessed = true);
    void              ObserveLog(void);
    void              ObserveHistory(const int i, const int days);
    void              RestoreRisk(void);
@@ -1359,7 +1359,7 @@ double CIndexSleeves::RegimeValue(const string sym)
 //| （直近80本を、何も持っていない状態から順にたどる。R2・D7 は数日〜数十日で   |
 //|   手じまうので、これで今の状態が決まる）                                |
 //+------------------------------------------------------------------+
-void CIndexSleeves::Reconstruct(const int i)
+void CIndexSleeves::Reconstruct(const int i, const bool upToProcessed = true)
   {
    const string sym = m_sym[i];
    MqlRates rt[];
@@ -1370,6 +1370,14 @@ void CIndexSleeves::Reconstruct(const int i)
       PrintFormat("[AMS] 指数の層：%s 確定した日足が %d 本しかないため、状態を復元できません", sym, got);
       return;
      }
+   //--- どの日足までを反映するか。
+   //    起動時（upToProcessed = true）：前回の処理のあとに確定した日足（前回の処理のときに作りかけだった足）は、ここでは反映しない。
+   //    次の判定で、ふつうどおり「新しく確定した1本」として反映する（そうしないと、起動し直した日だけ、ルールの出入りが
+   //    「変化なし」に見えて、止まらずに動いていた場合と建玉の直し方が変わる）。
+   int upto = got;
+   if(upToProcessed && m_lastBar[i] > 0)
+      while(upto > 216 && rt[upto - 1].time >= m_lastBar[i])
+         upto--;
    const string before = StateText(i);
    for(int r = 0; r < 3; r++)
       m_state[i][r] = 0;
@@ -1381,72 +1389,22 @@ void CIndexSleeves::Reconstruct(const int i)
    bool changed = false;
    string note = "";
    const datetime keepCheck = m_trendCheck[i];
-   UpdateStates(i, rt, got, (int)MathMax(205, got - 80), true, changed, note);
+   UpdateStates(i, rt, upto, (int)MathMax(205, upto - 80), true, changed, note);
    if(m_trd[i] && keepCheck == 0)
      {
       //--- 順張り：前回の見直しの記録がなければ、最後の日足で判定する
       double s200 = 0.0;
-      for(int k = got - 200; k < got; k++)
+      for(int k = upto - 200; k < upto; k++)
          s200 += rt[k].close;
-      m_state[i][IX_TREND] = (rt[got - 1].close > s200 / 200.0) ? 1 : 0;
-      m_trendCheck[i] = rt[got - 1].time;
+      m_state[i][IX_TREND] = (rt[upto - 1].close > s200 / 200.0) ? 1 : 0;
+      m_trendCheck[i] = rt[upto - 1].time;
      }
    m_reconOk[i]  = true;
-   m_stateBar[i] = rt[got - 1].time;
-   PrintFormat("[AMS] 指数の層：%s 状態の復元（最後の日足 %s）：%s%s%s", sym, TimeToString(rt[got - 1].time, TIME_DATE), StateText(i),
+   m_stateBar[i] = rt[upto - 1].time;
+   PrintFormat("[AMS] 指数の層：%s 状態の復元（最後の日足 %s）：%s%s%s", sym, TimeToString(rt[upto - 1].time, TIME_DATE), StateText(i),
                before != StateText(i) ? "（記録では " + before + "）" : "",
                m_regDays > 0 ? (m_regVal[i] == EMPTY_VALUE ? "、前提の監視：日足が足りず計算できない（IBS は使う）"
                                 : StringFormat("、前提の監視 %+.3f（%s）", m_regVal[i], m_regOn[i] > 0 ? "反転しやすい相場" : "続きやすい相場：IBS を止める")) : "");
-  }
-
-//+------------------------------------------------------------------+
-//| 翌日の値動きの大きさの見積もり（1日の標準偏差）。rt は古い順、         |
-//| 最後の要素が、最後に確定した日足                                      |
-//+------------------------------------------------------------------+
-double CIndexSleeves::DailyVol(const MqlRates &rt[], const int got)
-  {
-   double dailyVol = 0.0;
-   if(m_volModel == 1)
-     {
-      //--- HAR 型：その日の分散 = 値幅から計算した分散（Garman–Klass）＋ 前の終値から始値までの動きの2乗
-      double dv[22];
-      for(int q = 0; q < 22; q++)
-        {
-         const int    k  = got - 22 + q;
-         const double o  = rt[k].open, h = rt[k].high, l = rt[k].low, cl = rt[k].close, pc = rt[k - 1].close;
-         if(h > l && l > 0.0 && o > 0.0 && pc > 0.0)
-           {
-            const double hl = MathLog(h / l), co = MathLog(cl / o), on = MathLog(o / pc);
-            dv[q] = MathMax(0.5 * hl * hl - 0.3862943611198906 * co * co, 0.0) + on * on;
-           }
-         else
-           {
-            const double cc = (pc > 0.0 && cl > 0.0) ? MathLog(cl / pc) : 0.0;
-            dv[q] = cc * cc;
-           }
-        }
-      double m5 = 0.0, m22 = 0.0;
-      for(int q = 17; q < 22; q++)
-         m5 += dv[q];
-      for(int q = 0; q < 22; q++)
-         m22 += dv[q];
-      const double var = 0.37 * dv[21] + 0.56 * m5 / 5.0 + 0.20 * m22 / 22.0;
-      dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
-     }
-   else
-     {
-      //--- 直近60日の値動きの大きさ
-      double sum = 0.0, sum2 = 0.0;
-      for(int k = got - 60; k < got; k++)
-        {
-         const double r = rt[k].close / rt[k - 1].close - 1.0;
-         sum  += r;
-         sum2 += r * r;
-        }
-      const double var = (sum2 - sum * sum / 60.0) / 59.0;
-      dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
-     }
-   return(dailyVol);
   }
 
 //+------------------------------------------------------------------+
@@ -1524,11 +1482,26 @@ bool CIndexSleeves::Evaluate(const int i, const datetime t0)
          const string before = StateText(i);
          const bool   first  = !m_reconOk[i];
          m_reconOk[i] = false;
-         Reconstruct(i);
+         //--- 初めての復元（起動時に日足が届いていなかった）は、前回の処理までを反映する。日足が抜けたときは、最後の日足まで作り直す
+         Reconstruct(i, first);
          if(!m_reconOk[i])
            {
             Warn(i, "日足の履歴がまだそろわないため、状態を復元できません（そろうまで待ちます）");
             return(false);
+           }
+         if(first && got >= 2 && rt[got - 2].time > m_stateBar[i])
+           {
+            //--- 起動した時点で、すでに2本以上の日足が抜けていた：最後の日足まで作り直す
+            const string mid = StateText(i);
+            m_reconOk[i] = false;
+            Reconstruct(i, false);
+            if(!m_reconOk[i])
+               return(false);
+            if(mid != StateText(i))
+              {
+               changed = true;
+               note += " （止まっていたあいだの日足から、状態を作り直した）";
+              }
            }
          if(!first && before != StateText(i))
            {
