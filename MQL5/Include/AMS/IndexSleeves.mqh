@@ -14,9 +14,20 @@
 //|  TREND 終値が200日の平均より上のあいだだけ持つ（N 日ごとに見直す）       |
 //|                                                                  |
 //| 判定は、日足が確定したあと（次の日足が始まってから）に行い、その時点の     |
-//| 値段で売買する。建玉は、その銘柄の直近60日の値動きから、ルール1つ分の     |
-//| 値動きが「口座の年 x %」になる大きさにする。                           |
-//| ルールごとに別々の建玉は持たず、銘柄ごとの合計（目標のロット）に合わせる。 |
+//| 値段で売買する。建玉は、ルール1つ分の値動きが「口座の年 x %」になる        |
+//| 大きさにする。ルールごとに別々の建玉は持たず、銘柄ごとの合計に合わせる。   |
+//|                                                                  |
+//| 損失を小さくするための仕組み（98章。利益の出どころのルールは変えない）：    |
+//|  1 値動きの見積もり：翌日の分散 = 0.37×当日 + 0.56×5日の平均            |
+//|    + 0.20×22日の平均（分散は日足の始値・高値・安値・終値から計算。         |
+//|    HAR 型。係数は 2018年までの先物のデータで決めて固定）。                |
+//|    急に荒れ始めた直後に、建玉が大きくなりすぎるのを防ぐ。                  |
+//|  2 VIX の状態：戻りの利益は、VIX が高いときほど大きい（流動性を提供する     |
+//|    ことへの対価）。VIX が過去の分布の下 1/3 なら 0.5 倍、上 1/3 なら       |
+//|    1.5 倍にする。VIX は共通フォルダのファイルから読み、判定する日足より     |
+//|    前の日の終値だけを使う。ファイルがない・古いときは 1.0 倍。              |
+//|  3 逆指値：毎日、売買の時点の値段から「その日の値動きの見積もり × k」       |
+//|    だけ下に置き直す（1日の損失の上限を決める。EA が止まっていても効く）。    |
 //+------------------------------------------------------------------+
 #ifndef AMS_INDEXSLEEVES_MQH
 #define AMS_INDEXSLEEVES_MQH
@@ -47,7 +58,15 @@ private:
    double            m_maxLev;         // 建玉の合計 ÷ 有効証拠金 の上限
    double            m_maxMarginPct;   // 必要証拠金 ÷ 有効証拠金 の上限（%）
    double            m_band;           // 今の建玉と目標の差がこの割合未満なら、大きさは直さない
-   double            m_slVolMul;       // 急変に備えた損切り：日々の値動きの何倍か（0 で置かない）
+   double            m_slVolMul;       // 逆指値：その日の値動きの見積もりの何倍下に置くか（0 で置かない。毎日置き直す）
+   int               m_volModel;       // 値動きの見積もり：0 = 直近60日、1 = HAR 型
+   string            m_vixFile;        // VIX の日次の終値のファイル（共通フォルダ。空なら使わない）
+   double            m_vixLow;         // VIX が過去の分布の下 1/3 のときの、戻りの建玉の倍率
+   double            m_vixHigh;        // 上 1/3 のときの倍率
+   datetime          m_vixDate[];      // VIX の日付（古い順）
+   double            m_vixVal[];       // VIX の終値
+   datetime          m_vixTried;       // VIX のファイルを最後に読み直した時刻
+   datetime          m_vixWarnAt;
    int               m_delaySec;       // 新しい日足が始まってから、売買するまで待つ秒数
    double            m_maxSpreadPct;   // スプレッドがこの割合（値段に対する %）を超えているあいだは待つ
    int               m_state[][IX_NR]; // ルールごとの状態（1 = 持つ）
@@ -65,6 +84,9 @@ private:
    void              CloseSymbol(const string sym, const string why);
    void              OpenLots(const string sym, double lots, const double dailyVol);
    void              ReduceLots(const string sym, double lots);
+   void              ApplyStops(const string sym, const double dailyVol);
+   int               LoadVix(void);
+   double            VixMult(const datetime barDate, string &note);
    bool              Process(const int i, const datetime t0);
    void              Warn(const int i, const string msg);
    void              SaveState(void);
@@ -76,7 +98,8 @@ public:
    bool              Init(CTrade *trade, const ulong magic, const string &revSyms[], const string &trendSyms[],
                           const bool useR2, const bool useD7, const bool useIBS, const double revUnit, const double trendUnit,
                           const int trendDays, const double maxLev, const double maxMarginPct, const double band,
-                          const double slVolMul, const int delayMin, const double maxSpreadPct);
+                          const double slVolMul, const int delayMin, const double maxSpreadPct,
+                          const int volModel, const string vixFile, const double vixLow, const double vixHigh);
    void              OnTick(void);
   };
 
@@ -84,7 +107,8 @@ public:
 bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms[], const string &trendSyms[],
                          const bool useR2, const bool useD7, const bool useIBS, const double revUnit, const double trendUnit,
                          const int trendDays, const double maxLev, const double maxMarginPct, const double band,
-                         const double slVolMul, const int delayMin, const double maxSpreadPct)
+                         const double slVolMul, const int delayMin, const double maxSpreadPct,
+                         const int volModel, const string vixFile, const double vixLow, const double vixHigh)
   {
    m_trade        = trade;
    m_magic        = magic;
@@ -100,6 +124,14 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_slVolMul     = slVolMul;
    m_delaySec     = (int)MathMax(0, delayMin) * 60;
    m_maxSpreadPct = maxSpreadPct;
+   m_volModel     = volModel;
+   m_vixFile      = vixFile;
+   m_vixLow       = vixLow;
+   m_vixHigh      = vixHigh;
+   m_vixTried     = 0;
+   m_vixWarnAt    = 0;
+   ArrayResize(m_vixDate, 0);
+   ArrayResize(m_vixVal, 0);
    m_stateFile    = StringFormat("AMS_ix_state_%I64u.csv", magic);
    //--- 銘柄の一覧（戻りと順張りの両方に出てくる銘柄は、1つにまとめる）
    m_n = 0;
@@ -173,6 +205,14 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                "建玉の合計の上限 %.1f 倍、待ち %d 秒、スプレッドの上限 %.3f%%",
                m_n, m_ruleOn[IX_R2] ? "R2 " : "", m_ruleOn[IX_D7] ? "D7 " : "", m_ruleOn[IX_IBS] ? "IBS" : "", m_revUnit,
                m_trendUnit, m_trendDays, m_maxLev, m_delaySec, m_maxSpreadPct);
+   const int vixRows = (m_vixFile != "") ? LoadVix() : 0;
+   PrintFormat("[AMS] 指数の層：値動きの見積もり %s、逆指値 %s、VIX の倍率 %s",
+               m_volModel == 1 ? "HAR 型（当日・5日・22日の値幅）" : "直近60日",
+               m_slVolMul > 0.0 ? StringFormat("その日の値動きの見積もり × %.1f（毎日置き直す）", m_slVolMul) : "なし",
+               m_vixFile == "" ? "使わない" :
+               (vixRows >= 500 ? StringFormat("%s（%d 日分、最後の日付 %s）。下 1/3 で %.2f 倍・上 1/3 で %.2f 倍", m_vixFile, vixRows,
+                                              TimeToString(m_vixDate[vixRows - 1], TIME_DATE), m_vixLow, m_vixHigh)
+                : StringFormat("%s が読めない・足りない（%d 日分）ため、1.0 倍のまま", m_vixFile, vixRows)));
    return(m_n > 0);
   }
 
@@ -254,10 +294,9 @@ void CIndexSleeves::OpenLots(const string sym, double lots, const double dailyVo
       const double v = NormalizeLots(sym, (mx > 0.0) ? MathMin(lots, mx) : lots);
       if(v <= 0.0)
          break;
-      const double price = SymbolInfoDouble(sym, SYMBOL_ASK);
       double sl = 0.0;
       if(m_slVolMul > 0.0 && dailyVol > 0.0)
-         sl = NormalizeDouble(price * (1.0 - m_slVolMul * dailyVol), dg);
+         sl = NormalizeDouble(SymbolInfoDouble(sym, SYMBOL_BID) * (1.0 - m_slVolMul * dailyVol), dg);
       if(!m_trade.Buy(v, sym, 0.0, sl, 0.0, cmt))
         {
          PrintFormat("[AMS] 指数の層：%s の注文に失敗（%d %s）", sym, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
@@ -294,6 +333,142 @@ void CIndexSleeves::ReduceLots(const string sym, double lots)
             break;
         }
      }
+  }
+
+//+------------------------------------------------------------------+
+//| 逆指値を、今の値段から「その日の値動きの見積もり × k」だけ下に置き直す     |
+//+------------------------------------------------------------------+
+void CIndexSleeves::ApplyStops(const string sym, const double dailyVol)
+  {
+   if(m_slVolMul <= 0.0 || dailyVol <= 0.0)
+      return;
+   const double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+   const double pt  = SymbolInfoDouble(sym, SYMBOL_POINT);
+   const int    dg  = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   if(bid <= 0.0 || pt <= 0.0)
+      return;
+   const double minDist = (double)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL) * pt;
+   double sl = bid * (1.0 - m_slVolMul * dailyVol);
+   if(bid - sl < minDist)
+      sl = bid - minDist;
+   sl = NormalizeDouble(sl, dg);
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      const ulong tk = PositionGetTicket(i);
+      if(tk == 0 || PositionGetString(POSITION_SYMBOL) != sym || (ulong)PositionGetInteger(POSITION_MAGIC) != m_magic)
+         continue;
+      if(PositionGetInteger(POSITION_TYPE) != POSITION_TYPE_BUY)
+         continue;
+      if(MathAbs(PositionGetDouble(POSITION_SL) - sl) < 0.5 * pt)
+         continue;
+      if(!m_trade.PositionModify(tk, sl, PositionGetDouble(POSITION_TP)))
+         PrintFormat("[AMS] 指数の層：%s #%I64u の逆指値を置き直せません（%d %s）", sym, tk, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| VIX の日次の終値を、共通フォルダのファイルから読む                       |
+//| 行の形：日付,終値（日付は 2026.11.25／2026-11-25／11/25/2026 のどれか）   |
+//+------------------------------------------------------------------+
+int CIndexSleeves::LoadVix(void)
+  {
+   m_vixTried = TimeCurrent();
+   const int fh = FileOpen(m_vixFile, FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+      return(ArraySize(m_vixDate));
+   datetime dts[];
+   double   vals[];
+   int n = 0, cap = 0;
+   while(!FileIsEnding(fh))
+     {
+      string line = FileReadString(fh);
+      string f[];
+      if(StringSplit(line, ',', f) < 2)
+         continue;
+      string ds = f[0];
+      StringTrimLeft(ds);
+      StringTrimRight(ds);
+      StringReplace(ds, "-", ".");
+      string q[];
+      if(StringSplit(ds, '/', q) == 3)                 // 月/日/年
+         ds = q[2] + "." + q[0] + "." + q[1];
+      const datetime dt = StringToTime(ds);
+      const double   v  = StringToDouble(f[ArraySize(f) - 1]);
+      if(dt < D'1980.01.01' || v <= 0.0)
+         continue;
+      if(n > 0 && dt <= dts[n - 1])
+         continue;
+      if(n >= cap)
+        {
+         cap += 2048;
+         ArrayResize(dts, cap);
+         ArrayResize(vals, cap);
+        }
+      dts[n]  = dt;
+      vals[n] = v;
+      n++;
+     }
+   FileClose(fh);
+   if(n > ArraySize(m_vixDate))
+     {
+      ArrayResize(m_vixDate, n);
+      ArrayResize(m_vixVal, n);
+      for(int k = 0; k < n; k++)
+        {
+         m_vixDate[k] = dts[k];
+         m_vixVal[k]  = vals[k];
+        }
+     }
+   return(ArraySize(m_vixDate));
+  }
+
+//+------------------------------------------------------------------+
+//| VIX の状態による、戻りの建玉の倍率                                    |
+//| barDate（判定する日足の日付）より前の、最後の VIX の終値が、              |
+//| それまでの VIX の分布のどこにあるか（0〜1）で決める                      |
+//+------------------------------------------------------------------+
+double CIndexSleeves::VixMult(const datetime barDate, string &note)
+  {
+   if(m_vixFile == "")
+      return(1.0);
+   int n = ArraySize(m_vixDate);
+   //--- ファイルが古ければ、読み直す（実運用では、起動のたびに新しいファイルが置かれる）
+   if((n == 0 || m_vixDate[n - 1] < barDate - 86400) && (long)TimeCurrent() - (long)m_vixTried >= 3600)
+      n = LoadVix();
+   int lo = 0, hi = n - 1, j = -1;
+   while(lo <= hi)
+     {
+      const int mid = (lo + hi) / 2;
+      if(m_vixDate[mid] < barDate)
+        {
+         j = mid;
+         lo = mid + 1;
+        }
+      else
+         hi = mid - 1;
+     }
+   string why = "";
+   if(j < 499)
+      why = "VIX の記録が足りない";
+   else if((long)barDate - (long)m_vixDate[j] > 7 * 86400)
+      why = StringFormat("VIX の記録が古い（最後の日付 %s）", TimeToString(m_vixDate[j], TIME_DATE));
+   if(why != "")
+     {
+      if((long)TimeCurrent() - (long)m_vixWarnAt >= 6 * 3600)
+        {
+         m_vixWarnAt = TimeCurrent();
+         PrintFormat("[AMS] 指数の層：%sため、VIX の倍率は 1.0 のままにします", why);
+        }
+      return(1.0);
+     }
+   int le = 0;
+   for(int k = 0; k <= j; k++)
+      if(m_vixVal[k] <= m_vixVal[j])
+         le++;
+   const double rank = (double)le / (double)(j + 1);
+   const double mult = (rank < 1.0 / 3.0) ? m_vixLow : ((rank >= 2.0 / 3.0) ? m_vixHigh : 1.0);
+   note = StringFormat("VIX %.2f（%s、過去の分布での位置 %.2f）→ %.2f 倍", m_vixVal[j], TimeToString(m_vixDate[j], TIME_DATE), rank, mult);
+   return(mult);
   }
 
 //+------------------------------------------------------------------+
@@ -502,21 +677,55 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
            }
         }
      }
-   //--- 直近60日の値動きの大きさ（1日あたり、年率）
-   double sum = 0.0, sum2 = 0.0;
-   for(int k = got - 60; k < got; k++)
+   //--- 翌日の値動きの大きさの見積もり（1日の標準偏差）
+   double dailyVol = 0.0;
+   if(m_volModel == 1)
      {
-      const double r = rt[k].close / rt[k - 1].close - 1.0;
-      sum  += r;
-      sum2 += r * r;
+      //--- HAR 型：その日の分散 = 値幅から計算した分散（Garman–Klass）＋ 前の終値から始値までの動きの2乗
+      double dv[22];
+      for(int q = 0; q < 22; q++)
+        {
+         const int    k  = got - 22 + q;
+         const double o  = rt[k].open, h = rt[k].high, l = rt[k].low, cl = rt[k].close, pc = rt[k - 1].close;
+         if(h > l && l > 0.0 && o > 0.0 && pc > 0.0)
+           {
+            const double hl = MathLog(h / l), co = MathLog(cl / o), on = MathLog(o / pc);
+            dv[q] = MathMax(0.5 * hl * hl - 0.3862943611198906 * co * co, 0.0) + on * on;
+           }
+         else
+           {
+            const double cc = (pc > 0.0 && cl > 0.0) ? MathLog(cl / pc) : 0.0;
+            dv[q] = cc * cc;
+           }
+        }
+      double m5 = 0.0, m22 = 0.0;
+      for(int q = 17; q < 22; q++)
+         m5 += dv[q];
+      for(int q = 0; q < 22; q++)
+         m22 += dv[q];
+      const double var = 0.37 * dv[21] + 0.56 * m5 / 5.0 + 0.20 * m22 / 22.0;
+      dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
      }
-   const double var = (sum2 - sum * sum / 60.0) / 59.0;
-   const double dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
+   else
+     {
+      //--- 直近60日の値動きの大きさ
+      double sum = 0.0, sum2 = 0.0;
+      for(int k = got - 60; k < got; k++)
+        {
+         const double r = rt[k].close / rt[k - 1].close - 1.0;
+         sum  += r;
+         sum2 += r * r;
+        }
+      const double var = (sum2 - sum * sum / 60.0) / 59.0;
+      dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
+     }
    const double annVol = MathMax(dailyVol * MathSqrt(252.0), 0.025);
-   //--- 目標の建玉の額
+   //--- 目標の建玉の額（戻りの分は、VIX の状態で倍率をかける）
    const double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    const int nRev = m_state[i][IX_R2] + m_state[i][IX_D7] + m_state[i][IX_IBS];
-   double tgt = equity * (nRev * m_revUnit + m_state[i][IX_TREND] * m_trendUnit) / 100.0 / annVol;
+   string vixNote = "";
+   const double vmult = (nRev > 0) ? VixMult(rt[got - 1].time, vixNote) : 1.0;
+   double tgt = equity * (nRev * m_revUnit * vmult + m_state[i][IX_TREND] * m_trendUnit) / 100.0 / annVol;
    double others = 0.0;
    for(int k = 0; k < m_n; k++)
       if(k != i)
@@ -572,8 +781,12 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
       else if(cur > tl)
          ReduceLots(sym, cur - tl);
      }
+   //--- 逆指値を、今の値段から置き直す（持っている建玉すべて）
+   if(tl > 0.0)
+      ApplyStops(sym, dailyVol);
    if(changed || note != "")
-      PrintFormat("[AMS] 指数の層：%s%s → 持つルール：%s、目標 %.2f lot（額 %.0f、値動き 年 %.1f%%）", sym, note, StateText(i), tl, tgt, annVol * 100.0);
+      PrintFormat("[AMS] 指数の層：%s%s → 持つルール：%s、目標 %.2f lot（額 %.0f、値動きの見積もり 年 %.1f%%%s）", sym, note, StateText(i), tl, tgt,
+                  annVol * 100.0, vixNote == "" ? "" : "、" + vixNote);
    return(true);
   }
 

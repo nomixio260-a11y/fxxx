@@ -198,7 +198,11 @@ input double           InpIxTrendUnitVol    = 2.7;         // 順張り：1銘�
 input int              InpIxTrendCheckDays  = 7;           // 順張りを見直す間隔（日）
 input double           InpIxMaxLev          = 4.0;         // 建玉の合計 ÷ 有効証拠金 の上限
 input double           InpIxBand            = 0.25;        // 今の建玉と目標の差がこの割合未満なら、大きさは直さない（ルールの出入りがあれば必ず直す）
-input double           InpIxSLVolMul        = 0.0;         // 急変に備えた損切り：日々の値動きの何倍か（0で置かない。公表されたルールには損切りがない）
+input double           InpIxSLVolMul        = 4.0;         // 急落に備えた逆指値：毎日、その日の値動きの見積もりのこの倍率だけ下に置き直す（0で置かない）
+input int              InpIxVolModel        = 1;           // 建玉を決める値動きの見積もり：0=直近60日、1=HAR 型（当日・5日・22日の値幅から。98章）
+input string           InpIxVixFile         = "AMS_vix.csv"; // VIX の日次の終値（共通フォルダのファイル。行は「日付,終値」。空・ファイルなしなら倍率 1.0）
+input double           InpIxVixLowMult      = 0.5;         // VIX が過去の分布の下 1/3 のときの、戻りの建玉の倍率
+input double           InpIxVixHighMult     = 1.5;         // VIX が過去の分布の上 1/3 のときの、戻りの建玉の倍率
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
 input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
 
@@ -1325,7 +1329,7 @@ int OnInit(void)
         }
       if(!g_sleeves.Init(GetPointer(g_trade), InpMagic, revSyms, trendSyms, InpIxRuleR2, InpIxRuleD7, InpIxRuleIBS, InpIxRevUnitVol,
                          InpIxTrendUnitVol, InpIxTrendCheckDays, InpIxMaxLev, InpMaxMarginUsePct, InpIxBand, InpIxSLVolMul,
-                         InpIxDelayMin, InpIxMaxSpreadPct))
+                         InpIxDelayMin, InpIxMaxSpreadPct, InpIxVolModel, InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult))
         {
          Print("[AMS] 指数の層：取引できる銘柄がありません");
          return(INIT_FAILED);

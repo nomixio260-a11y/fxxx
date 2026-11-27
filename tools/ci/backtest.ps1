@@ -121,6 +121,8 @@ ShutdownTerminal=1
     Remove-Item "$dir\MQL5\Files\$name.csv" -ErrorAction SilentlyContinue
   }
 }
+# 方式 8（株価指数の層）は、VIX の日次の終値を共通フォルダのファイルから読む（98章）。検証の前に置いておく
+if ($kv['InpEntryMode'] -eq '8') { & (Join-Path $repo 'tools\ci\fetch_vix.ps1') }
 Write-Host "入力の上書き:`n$($inputLines -join "`n")"
 
 $ini = @"
