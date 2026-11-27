@@ -16,6 +16,7 @@
 #include <Trade\Trade.mqh>
 
 #define CT_DAYS 120   // 値動きの大きさ・相関に使う日数（日足の本数）
+#define CT_SWN  10    // 実運用：スワップの値を覚えておく日数（その中央値で判断する）
 
 //--- 各通貨の短期金利（3か月の銀行間金利、月次の平均、年率 %）。FRED（OECD の統計）の実際の値（tools/research/fred_data.py）。
 //    テスターでは、スワップの値が今のもので固定されるため、過去の判断に未来の金利差を使ってしまう。それを避けるため、
@@ -60,6 +61,14 @@ private:
    string            m_stateFile;    // 前回の入れ替えの時刻（共通フォルダ。デモ口座の回をまたいで引き継ぐ）
    bool              m_dailyExit;     // 毎日の手じまい（トレンドが逆・急変のペアは、次の入れ替えを待たずに手じまう。86章）
    datetime          m_lastExitDay;
+   //--- 実運用：日ごとのスワップの記録（業者の値は日によって変わり、数日分をまとめた値の日がある。
+   //    2026年11月27日の USDCAD は、ふだんの約3倍だった。1日の値だけで判断しないよう、直近 CT_SWN 日の中央値を使う）
+   double            m_swL[][CT_SWN];
+   double            m_swS[][CT_SWN];
+   int               m_swCnt[];
+   datetime          m_swDayI[];      // 銘柄ごとの、最後に記録した日
+   datetime          m_swTry;         // 最後に記録を試みた時刻
+   string            m_swFile;
 
    bool              DailyReturns(const string sym, double &r[]);
    double            Std(const double &x[], const int from, const int count);
@@ -73,9 +82,14 @@ private:
    void              ReduceLots(const string sym, double lots);
    double            NormalizeLots(const string sym, const double lots);
    void              DailyExits(void);
+   int               IndexOf(const string sym) const;
+   void              PushSwap(const int i, const double L, const double S);
+   void              LoadSwaps(void);
+   void              RecordSwaps(const datetime today);
+   double            MedianSwapPct(const int i, const bool isLong);
 
 public:
-                     CCarryTrend(void) : m_trade(NULL), m_magic(0), m_n(0), m_lastRebalance(0), m_initAt(0), m_dailyExit(false), m_lastExitDay(0) {}
+                     CCarryTrend(void) : m_trade(NULL), m_magic(0), m_n(0), m_lastRebalance(0), m_initAt(0), m_dailyExit(false), m_lastExitDay(0), m_swTry(0) {}
    void              SetDailyExit(const bool on) { m_dailyExit = on; }
    bool              Init(CTrade *trade, const ulong magic, const string &syms[], const int trendDays, const double minCarry,
                           const int topK, const double crashMul, const double volTarget, const double maxLev,
@@ -109,6 +123,13 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
    m_initAt       = TimeCurrent();
    m_n            = ArraySize(syms);
    ArrayResize(m_sym, m_n);
+   ArrayResize(m_swL, m_n);
+   ArrayResize(m_swS, m_n);
+   ArrayResize(m_swCnt, m_n);
+   ArrayInitialize(m_swCnt, 0);
+   ArrayResize(m_swDayI, m_n);
+   ArrayInitialize(m_swDayI, 0);
+   m_swFile       = StringFormat("AMS_ct_swaps_%I64u.csv", magic);
    for(int i = 0; i < m_n; i++)
      {
       m_sym[i] = syms[i];
@@ -133,6 +154,7 @@ bool CCarryTrend::Init(CTrade *trade, const ulong magic, const string &syms[], c
         }
       if(m_lastRebalance > 0)
          PrintFormat("[AMS] 金利差＋トレンド：前回の入れ替え %s", TimeToString(m_lastRebalance, TIME_DATE));
+      LoadSwaps();
      }
    PrintFormat("[AMS] 金利差＋トレンド：%d ペア、トレンド %d 日、金利差 %.1f%% 以上、上位 %d、急変 %.1f 倍、目標の年率ボラティリティ %.1f%%、"
                "建玉の合計の上限 %.1f 倍、入れ替え %d 日ごと（サーバー時刻 %d 時以降）",
@@ -256,14 +278,136 @@ double CCarryTrend::CarryPct(const string sym, const bool isLong)
    const double t = TesterCarryPct(sym, isLong);
    if(MQLInfoInteger(MQL_TESTER))
       return(t);
-   //--- 実運用：口座の実際のスワップ（上乗せ込みで、実際に受け取れる・払う年率）を使う。
-   //    買い・売りの両方が 0 のときは、まだ値を受け取っていない（2026年11月20日、起動直後に円のペアがすべて 0 だった）
-   //    とみなして、金利の表の見積もりを使う。
-   const double swL = SymbolInfoDouble(sym, SYMBOL_SWAP_LONG);
-   const double swS = SymbolInfoDouble(sym, SYMBOL_SWAP_SHORT);
-   if(swL == 0.0 && swS == 0.0)
-      return(t);
-   return(SwapAnnualPct(sym, isLong));
+   //--- 実運用：口座の実際のスワップ（上乗せ込みで、実際に受け取れる・払う年率）の、直近の日ごとの値の中央値を使う。
+   const int i = IndexOf(sym);
+   if(i >= 0 && m_swCnt[i] >= 3)
+      return(MedianSwapPct(i, isLong));
+   //--- 記録が3日分たまるまでは、金利の表の見積もりを使う。ただし、今日のスワップがはっきり払い（マイナス）の向きは持たない
+   //    （0 は、まだ値を受け取っていないことがあるので、外さない）
+   const double sw = SymbolInfoDouble(sym, isLong ? SYMBOL_SWAP_LONG : SYMBOL_SWAP_SHORT);
+   if(sw < 0.0)
+      return(MathMin(t, -1.0));
+   return(t);
+  }
+
+//+------------------------------------------------------------------+
+int CCarryTrend::IndexOf(const string sym) const
+  {
+   for(int i = 0; i < m_n; i++)
+      if(m_sym[i] == sym)
+         return(i);
+   return(-1);
+  }
+
+//+------------------------------------------------------------------+
+//| スワップの記録に1日分を加える（古いものから捨てる）                     |
+//+------------------------------------------------------------------+
+void CCarryTrend::PushSwap(const int i, const double L, const double S)
+  {
+   if(m_swCnt[i] >= CT_SWN)
+     {
+      for(int k = 1; k < CT_SWN; k++)
+        {
+         m_swL[i][k - 1] = m_swL[i][k];
+         m_swS[i][k - 1] = m_swS[i][k];
+        }
+      m_swCnt[i] = CT_SWN - 1;
+     }
+   m_swL[i][m_swCnt[i]] = L;
+   m_swS[i][m_swCnt[i]] = S;
+   m_swCnt[i]++;
+  }
+
+//+------------------------------------------------------------------+
+//| 記録のファイル（共通フォルダ）を読む。行：日付,銘柄,買い,売り            |
+//+------------------------------------------------------------------+
+void CCarryTrend::LoadSwaps(void)
+  {
+   const int fh = FileOpen(m_swFile, FILE_READ | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fh == INVALID_HANDLE)
+      return;
+   int rows = 0;
+   while(!FileIsEnding(fh))
+     {
+      const string d  = FileReadString(fh);
+      const string sy = FileReadString(fh);
+      const string sl = FileReadString(fh);
+      const string ss = FileReadString(fh);
+      if(d == "" || sy == "")
+         continue;
+      const datetime day = StringToTime(d);
+      const int i = IndexOf(sy);
+      if(i < 0 || day <= 0)
+         continue;
+      PushSwap(i, StringToDouble(sl), StringToDouble(ss));
+      if(day > m_swDayI[i])
+         m_swDayI[i] = day;
+      rows++;
+     }
+   FileClose(fh);
+   PrintFormat("[AMS] 金利差＋トレンド：スワップの記録 %d 行を読み込みました", rows);
+  }
+
+//+------------------------------------------------------------------+
+//| 今日のスワップの値を記録する（銘柄ごとに1日1回）。買い・売りとも 0 の     |
+//| 銘柄は、まだ値を受け取っていないとみなして記録せず、次の機会にやり直す     |
+//+------------------------------------------------------------------+
+void CCarryTrend::RecordSwaps(const datetime today)
+  {
+   int fh = INVALID_HANDLE;
+   int n = 0;
+   for(int i = 0; i < m_n; i++)
+     {
+      if(m_swDayI[i] == today)
+         continue;
+      const double L = SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_LONG);
+      const double S = SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_SHORT);
+      if(L == 0.0 && S == 0.0)
+         continue;
+      if(fh == INVALID_HANDLE)
+        {
+         fh = FileOpen(m_swFile, FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+         if(fh != INVALID_HANDLE)
+            FileSeek(fh, 0, SEEK_END);
+        }
+      PushSwap(i, L, S);
+      m_swDayI[i] = today;
+      n++;
+      if(fh != INVALID_HANDLE)
+         FileWrite(fh, TimeToString(today, TIME_DATE), m_sym[i], DoubleToString(L, 4), DoubleToString(S, 4));
+     }
+   if(fh != INVALID_HANDLE)
+      FileClose(fh);
+   if(n > 0)
+      PrintFormat("[AMS] 金利差＋トレンド：今日のスワップを記録しました（%d 銘柄）", n);
+  }
+
+//+------------------------------------------------------------------+
+//| 記録したスワップ（ポイント単位などの元の値）の中央値を、年率（%）にする    |
+//+------------------------------------------------------------------+
+double CCarryTrend::MedianSwapPct(const int i, const bool isLong)
+  {
+   const int n = m_swCnt[i];
+   if(n <= 0)
+      return(0.0);
+   double tmp[];
+   ArrayResize(tmp, n);
+   for(int k = 0; k < n; k++)
+      tmp[k] = isLong ? m_swL[i][k] : m_swS[i][k];
+   ArraySort(tmp);
+   const double med = (n % 2 == 1) ? tmp[n / 2] : 0.5 * (tmp[n / 2 - 1] + tmp[n / 2]);
+   //--- 今日の値との比で、SwapAnnualPct（今日の値の年率）を中央値の年率に直す
+   const double cur = SymbolInfoDouble(m_sym[i], isLong ? SYMBOL_SWAP_LONG : SYMBOL_SWAP_SHORT);
+   const int mode = (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_MODE);
+   if(mode == SYMBOL_SWAP_MODE_POINTS)
+     {
+      const double pt    = SymbolInfoDouble(m_sym[i], SYMBOL_POINT);
+      const double price = SymbolInfoDouble(m_sym[i], SYMBOL_BID);
+      return(price > 0.0 ? med * pt * 365.0 / price * 100.0 : 0.0);
+     }
+   if(cur != 0.0)
+      return(SwapAnnualPct(m_sym[i], isLong) * med / cur);
+   return(0.0);
   }
 
 //+------------------------------------------------------------------+
@@ -595,6 +739,12 @@ void CCarryTrend::OnTick(void)
    if(!MQLInfoInteger(MQL_TESTER) && (long)now - (long)m_initAt < 300)
       return;
    const datetime today = (datetime)((long)now - (long)now % 86400);
+   //--- 実運用：今日のスワップの値を記録する（銘柄ごとに1日1回。値がまだ届いていない銘柄は、10分ごとにやり直す）
+   if(!MQLInfoInteger(MQL_TESTER) && (long)now - (long)m_swTry >= 600)
+     {
+      m_swTry = now;
+      RecordSwaps(today);
+     }
    //--- 毎日の手じまい（1日1回。新しく持つ・増やすのは週1回の入れ替えだけ）
    if(m_dailyExit && today != m_lastExitDay)
      {
