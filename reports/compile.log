@@ -17,9 +17,9 @@ MQL5\Experts\AdaptiveMultiStrategyEA.mq5 : information: including MQL5\Include\A
 MQL5\Experts\AdaptiveMultiStrategyEA.mq5 : information: including MQL5\Include\AMS\CarryTrend.mqh
 MQL5\Experts\AdaptiveMultiStrategyEA.mq5 : information: including MQL5\Include\AMS\IndexSleeves.mqh
  : information: code generated
-Result: 0 errors, 0 warnings, 5205 ms elapsed, cpu='X64 Regular'
+Result: 0 errors, 0 warnings, 6322 ms elapsed, cpu='X64 Regular'
 
 
 MQL5\Scripts\AMS_ImportHistData.mq5 : information: compiling MQL5\Scripts\AMS_ImportHistData.mq5
  : information: code generated
-Result: 0 errors, 0 warnings, 582 ms elapsed, cpu='X64 Regular'
+Result: 0 errors, 0 warnings, 610 ms elapsed, cpu='X64 Regular'

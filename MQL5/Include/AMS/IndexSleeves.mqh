@@ -141,6 +141,10 @@ private:
    int               m_expTries[];     // 試した回数
    bool              m_expDone[];      // 書き出しが済んだか
    datetime          m_expAt;          // 最後に試した時刻
+   int               m_testRestartSec; // 検証用：この秒数ごとに「EA の起動し直し」を再現する（0 で使わない）
+   bool              m_testLoseState;  // 検証用：起動し直しのとき、状態のファイルも失われたものとする
+   datetime          m_testRestartAt;  // 検証用：最後に再現した時刻
+   long              m_testRestarts;   // 検証用：再現した回数
    bool              m_posSeen[];      // 起動時：その銘柄の、いまの建玉を確かめたか
    datetime          m_seenBar[];      // 新しい日足を見つけたときの、その日足の時刻
    datetime          m_seenAt[];       // 見つけた時刻
@@ -168,6 +172,7 @@ private:
    void              ObserveHistory(const int i, const int days);
    void              RestoreRisk(void);
    void              ExportDaily(void);
+   void              SimulateRestart(void);
    double            DailyVol(const MqlRates &rt[], const int got);
    double            RegimeValue(const string sym);
    void              ExecuteJoint(void);
@@ -190,7 +195,7 @@ public:
                           const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard,
                           const bool jointRound, const double jointEps, const bool warmStart, const int regimeDays,
                           const double regimeThr, const string regimeRef, const bool dryRun, const double equityOffset,
-                          const string exportSyms);
+                          const string exportSyms, const int testRestartMin, const bool testLoseState);
    void              OnTick(void);
    void              Summary(void);
   };
@@ -204,7 +209,7 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                          const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard,
                          const bool jointRound, const double jointEps, const bool warmStart, const int regimeDays,
                          const double regimeThr, const string regimeRef, const bool dryRun, const double equityOffset,
-                         const string exportSyms)
+                         const string exportSyms, const int testRestartMin, const bool testLoseState)
   {
    m_trade        = trade;
    m_magic        = magic;
@@ -240,6 +245,10 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_regThr       = (m_regDays > 0) ? regimeThr / MathSqrt((double)m_regDays) : 0.0;
    m_regRef       = regimeRef;
    m_eqOffset     = MathMax(0.0, equityOffset);
+   m_testRestartSec = (int)MathMax(0, testRestartMin) * 60;
+   m_testLoseState  = testLoseState;
+   m_testRestartAt  = 0;
+   m_testRestarts   = 0;
    //--- 観察モードのときだけ：日足の履歴を書き出す銘柄（研究用。テスターでは使わない）
    m_expAt = 0;
    ArrayResize(m_expSyms, 0);
@@ -479,6 +488,58 @@ void CIndexSleeves::RestoreRisk(void)
       PrintFormat("[AMS] 指数の層：起動時に持っていた建玉を、上限の計算に反映しました：%s", held);
    if(all)
       m_riskRestored = true;
+  }
+
+//+------------------------------------------------------------------+
+//| 検証用：EA の起動し直しを再現する。                                    |
+//| 実際の運用では、EA は数時間ごとに起動し直される（GitHub の回の入れ替え）。  |
+//| テスターには起動し直しがないので、メモリの中の記録を、起動した直後と同じ    |
+//| 状態に戻して、同じ結果になるかを確かめる。                              |
+//|  残るもの：状態のファイルに書く値（最後に処理した日足・順張りの見直しの日）  |
+//|  消えるもの：ルールの状態（日足から復元する）、目標のロット、値動きの見積もり |
+//| m_testLoseState = true なら、状態のファイルも失われたものとする。          |
+//+------------------------------------------------------------------+
+void CIndexSleeves::SimulateRestart(void)
+  {
+   m_testRestarts++;
+   for(int i = 0; i < m_n; i++)
+     {
+      if(m_warm)
+         for(int r = 0; r < 3; r++)
+            m_state[i][r] = 0;
+      m_tgtLots[i]  = 0.0;
+      m_dvol[i]     = 0.0;
+      m_target[i]   = 0.0;
+      m_regOn[i]    = 1;
+      m_regVal[i]   = EMPTY_VALUE;
+      m_evOk[i]     = false;
+      m_evChanged[i] = false;
+      m_evNote[i]   = "";
+      m_evVix[i]    = "";
+      m_evAnnVol[i] = 0.0;
+      m_evFrac[i]   = 0.0;
+      m_evalBar[i]  = 0;
+      m_evLast[i]   = 0;
+      m_seenBar[i]  = 0;
+      m_seenAt[i]   = 0;
+      m_warnAt[i]   = 0;
+      m_reconOk[i]  = false;
+      m_stateBar[i] = 0;
+      m_posSeen[i]  = false;
+      if(m_testLoseState)
+        {
+         m_lastBar[i]    = 0;
+         m_trendCheck[i] = 0;
+         if(!m_warm)
+            for(int r = 0; r < IX_NR; r++)
+               m_state[i][r] = 0;
+        }
+     }
+   m_riskRestored = false;
+   m_firstEval    = 0;
+   if(m_warm)
+      for(int i = 0; i < m_n; i++)
+         Reconstruct(i);
   }
 
 //+------------------------------------------------------------------+
@@ -977,6 +1038,9 @@ void CIndexSleeves::Summary(void)
       PrintFormat("[AMS] 指数の層：強制ロスカットを避ける上限で建玉を縮めた回数 %I64d", m_soCut);
    if(m_joint)
       PrintFormat("[AMS] 指数の層：まとめて丸めて、切り捨てより建玉が増えた回数 %I64d", m_jointUp);
+   if(m_testRestartSec > 0)
+      PrintFormat("[AMS] 指数の層：（検証用）EA の起動し直しを再現した回数 %I64d（%d 分ごと%s）", m_testRestarts, m_testRestartSec / 60,
+                  m_testLoseState ? "。状態のファイルも失われたものとした" : "");
   }
 
 //+------------------------------------------------------------------+
@@ -1927,6 +1991,13 @@ void CIndexSleeves::OnTick(void)
    const datetime now = TimeCurrent();
    bool saved = false;
    int  waiting = 0, pending = 0;
+   //--- 検証用：決めた間隔で、EA の起動し直しを再現する
+   if(m_testRestartSec > 0 && (long)now - (long)m_testRestartAt >= m_testRestartSec)
+     {
+      if(m_testRestartAt > 0)
+         SimulateRestart();
+      m_testRestartAt = now;
+     }
    if(!m_riskRestored)
       RestoreRisk();
    ExportDaily();
