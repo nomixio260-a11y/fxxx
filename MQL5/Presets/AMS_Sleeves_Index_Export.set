@@ -1,0 +1,35 @@
+; AdaptiveMultiStrategyEA - index sleeve, OBSERVATION ONLY + export of daily bars for research (chapter 101). No orders are sent.
+; Writes AMS_d1_<symbol>.csv and AMS_ix_symbols.csv to the common folder; the live workflow uploads them as an artifact (not committed).
+; Run with the workflow input trading=false.
+InpEntryMode=8
+InpIxRevSymbols=US500,US100,US30
+InpIxTrendSymbols=none
+InpIxRuleR2=true
+InpIxRuleD7=true
+InpIxRuleIBS=true
+InpIxRevUnitVol=8.75
+InpIxTrendUnitVol=0.0
+InpIxTrendCheckDays=7
+InpIxMaxLev=10.0
+InpIxBand=0.25
+InpIxSLVolMul=4.0
+InpIxVolModel=1
+InpIxVixFile=AMS_vix.csv
+InpIxVixLowMult=0.5
+InpIxVixHighMult=1.5
+InpIxRuleWeights=1,2,4
+InpIxSoGuard=0.9
+InpIxFlatMinutes=0
+InpIxFlatEdgeBp=0.0
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=90.0
+InpIxDelayMin=0
+InpIxJointRound=false
+InpIxJointEps=0.25
+InpIxWarmStart=true
+InpIxRegimeDays=1500
+InpIxRegimeThr=1.0
+InpIxRegimeRef=US500
+InpIxDryRun=true
+InpIxEquityOffset=0
+InpIxExportSymbols=US500,US100,US30,US2000,JP225,GER30,UK100,EU50,FRA40,NL25,AUS200,HK50,CHINA50,SING30

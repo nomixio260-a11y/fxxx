@@ -108,6 +108,13 @@ foreach ($f in 'AMS_live_deals.csv', 'AMS_live_account.csv') {
   $src = Join-Path $common $f
   if (Test-Path $src) { Get-Content $src | Out-File (Join-Path $outDir $f) -Encoding utf8 }
 }
+# 研究用の書き出し（観察モードの InpIxExportSymbols）。リポジトリには入れず、ワークフローの成果物として残す
+$exp = @(Get-ChildItem $common -Filter 'AMS_d1_*.csv' -ErrorAction SilentlyContinue) + @(Get-ChildItem $common -Filter 'AMS_ix_symbols.csv' -ErrorAction SilentlyContinue)
+if ($exp.Count -gt 0) {
+  New-Item -ItemType Directory -Force -Path "$outDir\export" | Out-Null
+  $exp | Copy-Item -Destination "$outDir\export" -Force
+  Write-Host "書き出したファイル $($exp.Count) 個を $outDir\export に集めました"
+}
 $stamp = $start.ToString('yyyyMMdd_HHmm')
 New-Item -ItemType Directory -Force -Path "$outDir\logs" | Out-Null
 $eaLines | Out-File "$outDir\logs\$stamp.log" -Encoding utf8

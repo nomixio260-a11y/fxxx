@@ -100,6 +100,14 @@ jobs:
         shell: pwsh
         run: ./tools/ci/live.ps1
 
+      - name: Upload research export (observation runs only)
+        if: ${{ always() && hashFiles('reports/live_index/export/*.csv') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: index-daily-export
+          path: reports/live_index/export
+          retention-days: 14
+
       - name: Save EA state
         if: ${{ always() && (inputs.trading || 'true') != 'false' }}
         uses: actions/cache/save@v4

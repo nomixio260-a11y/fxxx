@@ -136,6 +136,11 @@ private:
    datetime          m_stateBar[];     // ルールの状態に反映した、最後の確定した日足の時刻（状態の復元を使うとき）
    bool              m_obsDone;        // 観察モード：口座と銘柄の条件を、値段が届いたあとにもう一度ログに出したか
    bool              m_riskRestored;   // 起動時：いま持っている建玉と値動きの見積もりを、上限の計算に反映し終えたか
+   string            m_expSyms[];      // 観察モード：日足の履歴を書き出す銘柄（研究用）
+   int               m_expLast[];      // その銘柄の、前回に取れた日足の本数
+   int               m_expTries[];     // 試した回数
+   bool              m_expDone[];      // 書き出しが済んだか
+   datetime          m_expAt;          // 最後に試した時刻
    bool              m_posSeen[];      // 起動時：その銘柄の、いまの建玉を確かめたか
    datetime          m_seenBar[];      // 新しい日足を見つけたときの、その日足の時刻
    datetime          m_seenAt[];       // 見つけた時刻
@@ -162,6 +167,7 @@ private:
    void              ObserveLog(void);
    void              ObserveHistory(const int i, const int days);
    void              RestoreRisk(void);
+   void              ExportDaily(void);
    double            DailyVol(const MqlRates &rt[], const int got);
    double            RegimeValue(const string sym);
    void              ExecuteJoint(void);
@@ -183,7 +189,8 @@ public:
                           const int volModel, const string vixFile, const double vixLow, const double vixHigh,
                           const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard,
                           const bool jointRound, const double jointEps, const bool warmStart, const int regimeDays,
-                          const double regimeThr, const string regimeRef, const bool dryRun, const double equityOffset);
+                          const double regimeThr, const string regimeRef, const bool dryRun, const double equityOffset,
+                          const string exportSyms);
    void              OnTick(void);
    void              Summary(void);
   };
@@ -196,7 +203,8 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                          const int volModel, const string vixFile, const double vixLow, const double vixHigh,
                          const int flatMin, const double flatEdgeBp, const string ruleWeights, const double soGuard,
                          const bool jointRound, const double jointEps, const bool warmStart, const int regimeDays,
-                         const double regimeThr, const string regimeRef, const bool dryRun, const double equityOffset)
+                         const double regimeThr, const string regimeRef, const bool dryRun, const double equityOffset,
+                         const string exportSyms)
   {
    m_trade        = trade;
    m_magic        = magic;
@@ -232,6 +240,30 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_regThr       = (m_regDays > 0) ? regimeThr / MathSqrt((double)m_regDays) : 0.0;
    m_regRef       = regimeRef;
    m_eqOffset     = MathMax(0.0, equityOffset);
+   //--- 観察モードのときだけ：日足の履歴を書き出す銘柄（研究用。テスターでは使わない）
+   m_expAt = 0;
+   ArrayResize(m_expSyms, 0);
+   if(dryRun && !MQLInfoInteger(MQL_TESTER) && exportSyms != "")
+     {
+      string parts[];
+      const int np = StringSplit(exportSyms, ',', parts);
+      for(int q = 0; q < np; q++)
+        {
+         StringTrimLeft(parts[q]);
+         StringTrimRight(parts[q]);
+         if(parts[q] == "")
+            continue;
+         const int n = ArraySize(m_expSyms);
+         ArrayResize(m_expSyms, n + 1);
+         ArrayResize(m_expLast, n + 1);
+         ArrayResize(m_expTries, n + 1);
+         ArrayResize(m_expDone, n + 1);
+         m_expSyms[n] = parts[q];
+         m_expLast[n] = -1;
+         m_expTries[n] = 0;
+         m_expDone[n] = false;
+        }
+     }
    m_dryRun       = dryRun;
    m_firstEval    = 0;
    m_jointUp      = 0;
@@ -447,6 +479,88 @@ void CIndexSleeves::RestoreRisk(void)
       PrintFormat("[AMS] 指数の層：起動時に持っていた建玉を、上限の計算に反映しました：%s", held);
    if(all)
       m_riskRestored = true;
+  }
+
+//+------------------------------------------------------------------+
+//| 観察モード：指定した銘柄の日足の履歴と、銘柄の条件を、共通フォルダの       |
+//| ファイルに書き出す（研究用。注文は出さない）。履歴は、端末がサーバーから    |
+//| 取り寄せるのに時間がかかるので、本数が変わらなくなるまで10秒おきに試す。    |
+//+------------------------------------------------------------------+
+void CIndexSleeves::ExportDaily(void)
+  {
+   const int n = ArraySize(m_expSyms);
+   if(n == 0)
+      return;
+   const datetime now = TimeLocal();
+   if((long)now - (long)m_expAt < 10)
+      return;
+   m_expAt = now;
+   for(int j = 0; j < n; j++)
+     {
+      if(m_expDone[j])
+         continue;
+      const string sym = m_expSyms[j];
+      if(!SymbolSelect(sym, true))
+        {
+         PrintFormat("[AMS] 指数の層：（書き出し）%s は口座にありません", sym);
+         m_expDone[j] = true;
+         continue;
+        }
+      MqlRates rt[];
+      ArraySetAsSeries(rt, false);
+      const int got = CopyRates(sym, PERIOD_D1, 0, 6000, rt);
+      m_expTries[j]++;
+      const bool stable = (got > 0 && got == m_expLast[j] && m_expTries[j] >= 3);
+      m_expLast[j] = got;
+      if(!stable && m_expTries[j] < 45)
+         continue;
+      m_expDone[j] = true;
+      if(got <= 0)
+        {
+         PrintFormat("[AMS] 指数の層：（書き出し）%s の日足が取れませんでした", sym);
+         continue;
+        }
+      const int fh = FileOpen("AMS_d1_" + sym + ".csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+      if(fh == INVALID_HANDLE)
+         continue;
+      FileWrite(fh, "date", "open", "high", "low", "close", "tick_volume", "spread");
+      const int dg = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      for(int k = 0; k < got; k++)
+         FileWrite(fh, TimeToString(rt[k].time, TIME_DATE), DoubleToString(rt[k].open, dg), DoubleToString(rt[k].high, dg), DoubleToString(rt[k].low, dg),
+                   DoubleToString(rt[k].close, dg), IntegerToString(rt[k].tick_volume), IntegerToString(rt[k].spread));
+      FileClose(fh);
+      //--- 銘柄の条件（1行）
+      const int fs = FileOpen("AMS_ix_symbols.csv", FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+      if(fs != INVALID_HANDLE)
+        {
+         if(FileSize(fs) == 0)
+            FileWrite(fs, "symbol", "bars", "first", "last", "digits", "point", "contract", "vol_min", "vol_step", "swap_mode", "swap_long", "swap_short",
+                      "swap_sun", "swap_mon", "swap_tue", "swap_wed", "swap_thu", "swap_fri", "swap_sat", "notional_1lot", "margin_1lot", "spread_points", "bid",
+                      "currency_profit", "stops_level");
+         FileSeek(fs, 0, SEEK_END);
+         double mg = 0.0;
+         if(!OrderCalcMargin(ORDER_TYPE_BUY, sym, 1.0, SymbolInfoDouble(sym, SYMBOL_ASK), mg))
+            mg = 0.0;
+         FileWrite(fs, sym, IntegerToString(got), TimeToString(rt[0].time, TIME_DATE), TimeToString(rt[got - 1].time, TIME_DATE), IntegerToString(dg),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_POINT), 6), DoubleToString(SymbolInfoDouble(sym, SYMBOL_TRADE_CONTRACT_SIZE), 2),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN), 2), DoubleToString(SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP), 2),
+                   IntegerToString(SymbolInfoInteger(sym, SYMBOL_SWAP_MODE)), DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_LONG), 4),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_SHORT), 4),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_SUNDAY), 1), DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_MONDAY), 1),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_TUESDAY), 1), DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_WEDNESDAY), 1),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_THURSDAY), 1), DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_FRIDAY), 1),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_SWAP_SATURDAY), 1),
+                   DoubleToString(NotionalPerLot(sym), 0), DoubleToString(mg, 0),
+                   DoubleToString((SymbolInfoDouble(sym, SYMBOL_ASK) - SymbolInfoDouble(sym, SYMBOL_BID)) / MathMax(SymbolInfoDouble(sym, SYMBOL_POINT), 1e-9), 1),
+                   DoubleToString(SymbolInfoDouble(sym, SYMBOL_BID), dg), SymbolInfoString(sym, SYMBOL_CURRENCY_PROFIT),
+                   IntegerToString(SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL)));
+         FileClose(fs);
+        }
+      PrintFormat("[AMS] 指数の層：（書き出し）%s 日足 %d 本（%s〜%s）、スワップ 買い %.4f / 売り %.4f、最小 %.2f lot・刻み %.2f、1 lot の額 %.0f、スプレッド %.1f ポイント",
+                  sym, got, TimeToString(rt[0].time, TIME_DATE), TimeToString(rt[got - 1].time, TIME_DATE), SymbolInfoDouble(sym, SYMBOL_SWAP_LONG),
+                  SymbolInfoDouble(sym, SYMBOL_SWAP_SHORT), SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN), SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP), NotionalPerLot(sym),
+                  (SymbolInfoDouble(sym, SYMBOL_ASK) - SymbolInfoDouble(sym, SYMBOL_BID)) / MathMax(SymbolInfoDouble(sym, SYMBOL_POINT), 1e-9));
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -1815,6 +1929,7 @@ void CIndexSleeves::OnTick(void)
    int  waiting = 0, pending = 0;
    if(!m_riskRestored)
       RestoreRisk();
+   ExportDaily();
    for(int i = 0; i < m_n; i++)
      {
       if(m_flatMin > 0)

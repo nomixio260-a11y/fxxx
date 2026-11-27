@@ -77,7 +77,8 @@ def joint_round(xs, npl, sig, corr, spec):
     return x
 
 
-def simulate(method, start, end, deposit, unit):
+def simulate(method, start, end, deposit, unit, return_eq=False):
+    """return_eq=True なら、日ごとの資産の推移（Series）を返す（target300.py で使う）。"""
     D, ST, SIGD, OK = {}, {}, {}, {}
     for s in SYMS:
         d = M.prepare(M.ALL[s][0])
@@ -151,6 +152,8 @@ def simulate(method, start, end, deposit, unit):
         eqs.append(cash + sum(lots[s] * last_close[s] * fx for s in SYMS))
         prev_day = day
     eq = pd.Series(eqs, index=pd.DatetimeIndex(idx))
+    if return_eq:
+        return eq
     dr = eq.pct_change().dropna()
     yrs = (eq.index[-1] - eq.index[0]).days / 365.25
     e, t = np.array(expo), np.array(tgt_expo)

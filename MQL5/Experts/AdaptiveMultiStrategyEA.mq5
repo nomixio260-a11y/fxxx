@@ -213,6 +213,7 @@ input int              InpIxRegimeDays      = 1500;        // 前提の監視：
 input double           InpIxRegimeThr       = 1.0;         // 前提の監視のしきい値：当日の値動きと、直前4日の値動きの重みつきの合計の、順位の相関が、標準誤差（1 ÷ √日数）のこの倍数を超えたら止める（1,500日・1.0 なら +0.026）
 input string           InpIxRegimeRef       = "US500";     // 前提の監視に使う銘柄（この銘柄の日足で、すべての銘柄をまとめて判定する。none なら銘柄ごとに判定）
 input bool             InpIxDryRun          = false;       // 観察モード：注文を一切出さず、判定と目標の建玉だけをログに出す（実際の口座との突き合わせ用）
+input string           InpIxExportSymbols   = "none";      // 観察モードのときだけ：日足の履歴を共通フォルダに書き出す銘柄（カンマ区切り。研究用。none なら書き出さない）
 input double           InpIxEquityOffset    = 0.0;         // 建玉の計算に使わない額（円）。デモ口座の残高が検証の元金より大きいとき、その差を入れると、検証と同じ元金で動かせる（例：残高 300万円・元金 50万円なら 2500000）
 input double           InpIxSoGuard         = 0.9;         // 強制ロスカットを避ける上限：すべての建玉が逆指値にかかっても証拠金維持率がロスカットの水準を下回らない大きさに抑える（余裕の係数。0で使わない。99章）
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
@@ -1345,7 +1346,8 @@ int OnInit(void)
                          (InpIxVixFile == "none" || InpIxVixFile == "-") ? "" : InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult,
                          InpIxFlatMinutes, InpIxFlatEdgeBp, InpIxRuleWeights, InpIxSoGuard,
                          InpIxJointRound, InpIxJointEps, InpIxWarmStart, InpIxRegimeDays, InpIxRegimeThr,
-                         (InpIxRegimeRef == "none" || InpIxRegimeRef == "-") ? "" : InpIxRegimeRef, InpIxDryRun, InpIxEquityOffset))
+                         (InpIxRegimeRef == "none" || InpIxRegimeRef == "-") ? "" : InpIxRegimeRef, InpIxDryRun, InpIxEquityOffset,
+                         (InpIxExportSymbols == "none" || InpIxExportSymbols == "-") ? "" : InpIxExportSymbols))
         {
          Print("[AMS] 指数の層：取引できる銘柄がありません");
          return(INIT_FAILED);

@@ -11,3 +11,5 @@ tester/credentials.env
 *.tmp
 __pycache__/
 data/
+# 研究用の書き出し（業者の値段の履歴。リポジトリには入れない）
+reports/live_index/export/
