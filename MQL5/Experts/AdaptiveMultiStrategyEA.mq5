@@ -171,7 +171,7 @@ input int              InpOrderRetries      = 3;           // 注文が一時的
 input bool             InpUseTimer          = true;        // 実運用時、タイマーでも全銘柄を処理する（チャート銘柄のティックが止まっても動く）
 input bool             InpListSymbols       = false;       // 起動時に、業者が扱うすべての銘柄名をログに出して終了する（調査用）
 input string           InpExportBars        = "";          // 調査用：取引せず、テストの終わりにこの銘柄（カンマ区切り）の足を AMS_bars_<銘柄>.csv に書き出す
-input int              InpExportBarsMin     = 30;          // 書き出す足の長さ（分：1/5/15/30/60）
+input int              InpExportBarsMin     = 30;          // 書き出す足の長さ（分：1/5/15/30/60/240/1440）
 input string           InpExportBarsFrom    = "2015.01.01"; // 書き出しの開始日
 
 input group "=== 金利差＋トレンド（方式 7、InpEntryMode=7） ==="
@@ -188,8 +188,8 @@ input double           InpCtSLVolMul        = 6.0;         // 急変に備えた
 input bool             InpCtDailyExit       = false;       // 毎日の手じまい：持っているペアのトレンドが逆・急変なら、次の入れ替えを待たずに手じまう（86章）
 
 input group "=== 株価指数・金の層（方式 8、InpEntryMode=8） ==="
-input string           InpIxRevSymbols      = "US500,US100,US30";  // 売られすぎの戻り（R2・D7・IBS）を使う銘柄（カンマ区切り。空なら使わない）
-input string           InpIxTrendSymbols    = "US500,US100,US30,JP225,DE30,UK100"; // 順張り（200日の平均より上のときだけ買い）を使う銘柄（空なら使わない）
+input string           InpIxRevSymbols      = "US500,US100,US30";  // 売られすぎの戻り（R2・D7・IBS）を使う銘柄（カンマ区切り。none なら使わない）
+input string           InpIxTrendSymbols    = "none";      // 順張り（200日の平均より上のときだけ買い）を使う銘柄（カンマ区切り。none なら使わない）
 input bool             InpIxRuleR2          = true;        // R2：200日の平均より上で RSI(2) < 10 → 買い、5日の平均を上回ったら手じまい
 input bool             InpIxRuleD7          = true;        // D7：200日の平均より上で過去7日の終値の最安値 → 買い、過去7日の最高値で手じまい
 input bool             InpIxRuleIBS         = true;        // IBS：(終値−安値)÷(高値−安値) < 0.2 → 買い、次の日足で見直す
@@ -200,7 +200,7 @@ input double           InpIxMaxLev          = 4.0;         // 建玉の合計 ÷
 input double           InpIxBand            = 0.25;        // 今の建玉と目標の差がこの割合未満なら、大きさは直さない（ルールの出入りがあれば必ず直す）
 input double           InpIxSLVolMul        = 4.0;         // 急落に備えた逆指値：毎日、その日の値動きの見積もりのこの倍率だけ下に置き直す（0で置かない）
 input int              InpIxVolModel        = 1;           // 建玉を決める値動きの見積もり：0=直近60日、1=HAR 型（当日・5日・22日の値幅から。98章）
-input string           InpIxVixFile         = "AMS_vix.csv"; // VIX の日次の終値（共通フォルダのファイル。行は「日付,終値」。空・ファイルなしなら倍率 1.0）
+input string           InpIxVixFile         = "AMS_vix.csv"; // VIX の日次の終値（共通フォルダのファイル。行は「日付,終値」。none・ファイルなしなら倍率 1.0）
 input double           InpIxVixLowMult      = 0.5;         // VIX が過去の分布の下 1/3 のときの、戻りの建玉の倍率
 input double           InpIxVixHighMult     = 1.5;         // VIX が過去の分布の上 1/3 のときの、戻りの建玉の倍率
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
@@ -1289,7 +1289,7 @@ int OnInit(void)
            {
             StringTrimLeft(raw[i]);
             StringTrimRight(raw[i]);
-            if(raw[i] == "")
+            if(raw[i] == "" || raw[i] == "none" || raw[i] == "-")      // 「none」と書けば、その層は使わない（テスターは、空の文字列の指定を既定値に戻すため）
                continue;
             const string sym = ResolveSymbol(raw[i]);
             if(sym == "")
@@ -1329,7 +1329,8 @@ int OnInit(void)
         }
       if(!g_sleeves.Init(GetPointer(g_trade), InpMagic, revSyms, trendSyms, InpIxRuleR2, InpIxRuleD7, InpIxRuleIBS, InpIxRevUnitVol,
                          InpIxTrendUnitVol, InpIxTrendCheckDays, InpIxMaxLev, InpMaxMarginUsePct, InpIxBand, InpIxSLVolMul,
-                         InpIxDelayMin, InpIxMaxSpreadPct, InpIxVolModel, InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult))
+                         InpIxDelayMin, InpIxMaxSpreadPct, InpIxVolModel,
+                         (InpIxVixFile == "none" || InpIxVixFile == "-") ? "" : InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult))
         {
          Print("[AMS] 指数の層：取引できる銘柄がありません");
          return(INIT_FAILED);
@@ -1497,6 +1498,8 @@ void ExportBarsAll(void)
       case 5:  tf = PERIOD_M5;  break;
       case 15: tf = PERIOD_M15; break;
       case 60: tf = PERIOD_H1;  break;
+      case 240: tf = PERIOD_H4; break;
+      case 1440: tf = PERIOD_D1; break;
       default: tf = PERIOD_M30; break;
      }
    string syms[];
