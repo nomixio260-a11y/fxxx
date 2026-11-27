@@ -16,6 +16,8 @@ $period = if ($env:BT_PERIOD) { $env:BT_PERIOD } else { 'H1' }
 # 既定は、通常のバックテストがランダム遅延、最適化は遅延なし（速度と再現性のため）
 $execMode = if ($env:BT_EXECUTION) { $env:BT_EXECUTION } elseif ($mode -eq 'optimize') { '0' } else { '-1' }
 $deposit  = if ($env:BT_DEPOSIT) { $env:BT_DEPOSIT } else { '1000000' }
+# テスターの口座のレバレッジ（為替の口座は 25 倍。株価指数の CFD は 10 倍なので、指数の検証では 10 を指定する）
+$leverage = if ($env:BT_LEVERAGE) { $env:BT_LEVERAGE } else { '25' }
 $tfValue = @{ 'M1' = 1; 'M5' = 5; 'M15' = 15; 'M30' = 30; 'H1' = 16385; 'H2' = 16386; 'H4' = 16388; 'D1' = 16408 }[$period]
 if (-not $tfValue) { throw "未対応の時間足: $period" }
 $reportName = "AMS_$($symbol -replace '[^A-Za-z0-9]', '_')_$period"
@@ -139,7 +141,7 @@ FromDate=$from
 ToDate=$to
 Deposit=$deposit
 Currency=JPY
-Leverage=1:25
+Leverage=1:$leverage
 ExecutionMode=$execMode
 Visual=0
 Report=reports\$reportName
@@ -243,7 +245,7 @@ if (Test-Path "$out\tester_last.log") {
   $tpN = @($tl | Where-Object { $_ -match 'take profit triggered' }).Count
   $eaN = @($tl | Where-Object { $_ -match '\[AMS\] 決済 #' }).Count
   $soN = @($tl | Where-Object { $_ -match 'stop out' }).Count
-  $ev  = @($tl | Where-Object { $_ -match '\[AMS\] \S+ (BUY|SELL) |stop loss triggered|take profit triggered|\[AMS\] 決済 #|週明け|エントリーの方式|DD上限|下落したため|自動調整' })
+  $ev  = @($tl | Where-Object { $_ -match '\[AMS\] \S+ (BUY|SELL) |stop loss triggered|take profit triggered|\[AMS\] 決済 #|週明け|エントリーの方式|DD上限|下落したため|自動調整|指数の層：\S+（|stop out|margin call' })
   $lines = @("SAMPLE sl_hit=$slN tp_hit=$tpN closed_by_ea=$eaN stop_out=$soN")
   $lines += ($ev | Select-Object -First 48 | ForEach-Object {
     $x = $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 '

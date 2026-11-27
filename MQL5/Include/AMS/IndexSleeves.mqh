@@ -148,9 +148,13 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
       m_warnAt[i] = 0;
       if(!SymbolSelect(m_sym[i], true))
          PrintFormat("[AMS] 指数の層：%s を気配値表示に追加できません", m_sym[i]);
-      PrintFormat("[AMS] 指数の層：%s（%s%s）最小 %.2f lot・刻み %.2f、1 lot の額 %.0f、スワップ（方式=%d）買い %.4f / 売り %.4f",
+      double mg = 0.0;
+      if(!OrderCalcMargin(ORDER_TYPE_BUY, m_sym[i], 1.0, SymbolInfoDouble(m_sym[i], SYMBOL_ASK), mg))
+         mg = 0.0;
+      PrintFormat("[AMS] 指数の層：%s（%s%s）最小 %.2f lot・刻み %.2f、1 lot の額 %.0f・必要証拠金 %.0f（口座のレバレッジ 1:%d）、スワップ（方式=%d）買い %.4f / 売り %.4f",
                   m_sym[i], m_rev[i] ? "戻り" : "", m_trd[i] ? (m_rev[i] ? "・順張り" : "順張り") : "",
-                  SymbolInfoDouble(m_sym[i], SYMBOL_VOLUME_MIN), SymbolInfoDouble(m_sym[i], SYMBOL_VOLUME_STEP), NotionalPerLot(m_sym[i]),
+                  SymbolInfoDouble(m_sym[i], SYMBOL_VOLUME_MIN), SymbolInfoDouble(m_sym[i], SYMBOL_VOLUME_STEP), NotionalPerLot(m_sym[i]), mg,
+                  (int)AccountInfoInteger(ACCOUNT_LEVERAGE),
                   (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_MODE), SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_LONG),
                   SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_SHORT));
      }

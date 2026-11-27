@@ -65,6 +65,10 @@ on:
         description: "仮の銘柄（公開の1分足から作る。カンマ区切り：US500_HD,US100_HD,XAU_HD。空なら使わない）"
         required: false
         default: ""
+      leverage:
+        description: "テスターの口座のレバレッジ（空なら 25。株価指数の CFD は 10）"
+        required: false
+        default: ""
       account:
         description: "ログインする口座（fx=為替 / index=株価指数CFD / commodity=商品CFD。index と commodity は、それぞれのシークレットが必要）"
         required: false
@@ -142,6 +146,7 @@ jobs:
       BT_FORWARD: ${{ inputs.forward_date }}
       BT_TIMEOUT_MIN: ${{ inputs.timeout_min || (inputs.mode == 'optimize' && '80') || '25' }}
       BT_CUSTOM: ${{ inputs.custom }}
+      BT_LEVERAGE: ${{ inputs.leverage }}
       BT_CHART_SYMBOL: ${{ vars.MT5_SYMBOL || 'USDJPY' }}
     steps:
       - uses: actions/checkout@v4
@@ -222,7 +227,7 @@ jobs:
         run: |
           out="$RUNNER_TEMP/run_result.txt"
           {
-            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} deposit=${BT_DEPOSIT:-1000000} preset=${BT_PRESET:-none} inputs=${BT_INPUTS:-default}${BT_CUSTOM:+ custom=${BT_CUSTOM} symbol=${BT_SYMBOL}} account=${BT_ACCOUNT:-fx}"
+            echo "run=${GITHUB_RUN_NUMBER} mode=${BT_MODE} period=${BT_PERIOD} model=${BT_MODEL} exec=${BT_EXECUTION:-default} from=${BT_FROM:-default} to=${BT_TO:-default} symbols=${BT_SYMBOLS:-default} deposit=${BT_DEPOSIT:-1000000} preset=${BT_PRESET:-none} inputs=${BT_INPUTS:-default}${BT_CUSTOM:+ custom=${BT_CUSTOM} symbol=${BT_SYMBOL}} account=${BT_ACCOUNT:-fx}${BT_LEVERAGE:+ leverage=${BT_LEVERAGE}}"
             cat reports/result_line.txt 2>/dev/null || echo "RESULT なし（テスト失敗）"
             # 月ごとの損益率（モンテカルロ分析などに使う）："MONTHLY 2015-01:+1.23,2015-02:-0.45,..."
             if [ -f reports/AMS_monthly.csv ]; then
