@@ -1,23 +1,34 @@
-; AdaptiveMultiStrategyEA - index sleeves (entry mode 8, chapter 93). No specific days and no time-of-day habits are used for decisions.
+; AdaptiveMultiStrategyEA - index mean-reversion sleeve (entry mode 8, chapters 93, 97 and 98).
+; No specific days and no time-of-day habits are used for decisions.
 ; For an index CFD account (OANDA: a separate sub-account from FX). Symbol names differ by broker/account: check the log line
-; "[AMS] 口座にある銘柄" on the first run and edit the two lists below.
-; Mean reversion (long only, published rules, unchanged numbers): R2 / D7 / IBS on the three US indices.
-; Trend (long only): hold while the close is above the 200-day average, reviewed every 7 days, on six indices.
-; Sizing: each active rule adds a position whose own volatility is 2.7% of equity per year (reversion sleeve about 10% per year
-; with 3 indices x 3 rules); each trend position 2.7% (trend sleeve about 10% per year with 6 indices).
+; "[AMS] 口座にある銘柄" on the first run and edit the list below.
+; Signals (long only, published rules, unchanged numbers): R2 / D7 / IBS on the three US indices.
+; Sizing and loss control (chapter 98):
+;   - each active rule adds a position whose own volatility is InpIxRevUnitVol % of equity per year,
+;     using a HAR-type forecast of next-day volatility (InpIxVolModel=1);
+;   - the reversion size is multiplied by 0.5 / 1.0 / 1.5 when the VIX is in the lower / middle / upper third of its own history
+;     (file AMS_vix.csv in the common folder, refreshed by tools/ci/fetch_vix.ps1; 1.0 when the file is missing or stale);
+;   - a stop is re-based every day at 4 x the forecast daily volatility below the price (InpIxSLVolMul=4).
+; InpIxRevUnitVol decides how much is risked. Verified on the index account (last 3 years, 500,000 JPY, real ticks: see chapter 98):
+;   7.5 = cautious, 10 = middle (this file), 12.5-15 = aggressive (drawdowns of 30-40%); 17.5 and above was stopped out.
+; The trend sleeve is off: on index CFDs it adds nothing on top of the reversion sleeve (chapter 96).
 ; Attach to a chart of any symbol in the account (H1).
 InpEntryMode=8
 InpIxRevSymbols=US500,US100,US30
-InpIxTrendSymbols=US500,US100,US30,JP225,DE30,UK100
+InpIxTrendSymbols=none
 InpIxRuleR2=true
 InpIxRuleD7=true
 InpIxRuleIBS=true
-InpIxRevUnitVol=2.7
-InpIxTrendUnitVol=2.7
+InpIxRevUnitVol=10.0
+InpIxTrendUnitVol=0.0
 InpIxTrendCheckDays=7
-InpIxMaxLev=5.0
+InpIxMaxLev=10.0
 InpIxBand=0.25
-InpIxSLVolMul=0.0
+InpIxSLVolMul=4.0
+InpIxVolModel=1
+InpIxVixFile=AMS_vix.csv
+InpIxVixLowMult=0.5
+InpIxVixHighMult=1.5
 InpIxDelayMin=5
 InpIxMaxSpreadPct=0.05
-InpMaxMarginUsePct=80.0
+InpMaxMarginUsePct=90.0

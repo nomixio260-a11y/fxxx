@@ -2,9 +2,11 @@
 ; For a commodity CFD account (OANDA: a separate sub-account from FX and from indices).
 ; Trend (long only): hold gold while the close is above the 200-day average, reviewed every 7 days.
 ; Sizing: the position's own volatility is 11.2% of equity per year (trend sleeve about 10% per year).
+; The chapter-98 additions (HAR-type volatility forecast, VIX multiplier, daily stop) were validated for the index reversion sleeve only,
+; so this preset keeps the validated form: 60-day volatility, no VIX multiplier, no stop.
 ; Attach to an XAUUSD chart (H1).
 InpEntryMode=8
-InpIxRevSymbols=
+InpIxRevSymbols=none
 InpIxTrendSymbols=XAUUSD
 InpIxRuleR2=false
 InpIxRuleD7=false
@@ -15,6 +17,8 @@ InpIxTrendCheckDays=7
 InpIxMaxLev=3.0
 InpIxBand=0.25
 InpIxSLVolMul=0.0
+InpIxVolModel=0
+InpIxVixFile=none
 InpIxDelayMin=5
 InpIxMaxSpreadPct=0.05
 InpMaxMarginUsePct=80.0

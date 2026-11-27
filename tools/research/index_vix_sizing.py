@@ -10,7 +10,7 @@
   4 予想モデルとして：「ルールの数 × VIX の状態」ごとの平均の利益を、**毎年、前の年までのデータだけで**計算し、それに比例して持つ形
     （建玉 ∝ 予想される利益 ÷ 分散。ケリーの考え方）。事前に決めた倍率と同じくらい良ければ、倍率の選び方に頼っていないことになる。
   5 EA と同じ形（CFD の日足、2011年9月〜2026年10月）でも同じか。
-  6 逆指値（3×σ）と合わせた場合。
+  6 逆指値（3×σ・4×σ）と合わせた場合。
 - VIX は、1日前の終値を使う（判定する日の VIX の終値 16:15 は、株の終値 16:00 より後のため。CFD の日足 17:00 区切りなら当日の値も使えるが、厳しめにする）。
   VIX の「水準」は、その日までの過去の VIX（1990年〜）の分布での位置（0〜1）。
 使い方: python3 tools/research/index_vix_sizing.py  → reports/research/index_vix_sizing.md
@@ -211,15 +211,17 @@ def main():
                          ("VIX で変える（0.75・1・1.25）", {n: mult_of(rk_f[n], (0.75, 1.0, 1.25)) for n in cfd}, None),
                          ("VIX で変える（0.25・1・1.75）", {n: mult_of(rk_f[n], (0.25, 1.0, 1.75)) for n in cfd}, None),
                          ("変えない ＋ 逆指値 3×σ", {n: mult_of(rk_f[n], None) for n in cfd}, 3.0),
-                         ("VIX で変える（0.5・1・1.5）＋ 逆指値 3×σ", {n: mult_of(rk_f[n], (0.5, 1.0, 1.5)) for n in cfd}, 3.0)):
+                         ("VIX で変える（0.5・1・1.5）＋ 逆指値 3×σ", {n: mult_of(rk_f[n], (0.5, 1.0, 1.5)) for n in cfd}, 3.0),
+                         ("**VIX で変える（0.5・1・1.5）＋ 逆指値 4×σ（EA の既定）**", {n: mult_of(rk_f[n], (0.5, 1.0, 1.5)) for n in cfd}, 4.0)):
         s, z = stat(sleeve(cfd, mm, "cfd", k), "2011-09-01", PER_C)
         lines.append(f"| {label} | {s} |")
         keep["5 " + label] = z
         print(lines[-1], flush=True)
-    lines += ["", "## 6 現物の3指数で、逆指値（3×σ）と合わせた場合（2000年10月〜2026年11月）", "", head, sep]
+    lines += ["", "## 6 現物の3指数で、逆指値と合わせた場合（2000年10月〜2026年11月）", "", head, sep]
     for label, mm, k in (("変えない・逆指値なし", {n: mult_of(rk_c[n], None) for n in cash}, None), ("変えない ＋ 逆指値 3×σ", {n: mult_of(rk_c[n], None) for n in cash}, 3.0),
                          ("VIX で変える・逆指値なし", {n: mult_of(rk_c[n], (0.5, 1.0, 1.5)) for n in cash}, None),
-                         ("**VIX で変える ＋ 逆指値 3×σ**", {n: mult_of(rk_c[n], (0.5, 1.0, 1.5)) for n in cash}, 3.0)):
+                         ("VIX で変える ＋ 逆指値 3×σ", {n: mult_of(rk_c[n], (0.5, 1.0, 1.5)) for n in cash}, 3.0),
+                         ("**VIX で変える ＋ 逆指値 4×σ（EA の既定）**", {n: mult_of(rk_c[n], (0.5, 1.0, 1.5)) for n in cash}, 4.0)):
         s, z = stat(sleeve(cash, mm, "cash", k), IRK.START, IRK.PER)
         lines.append(f"| {label} | {s} |")
         keep["6 " + label] = z

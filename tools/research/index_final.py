@@ -4,13 +4,15 @@
 改良後の形（利益の出どころ = 公表済みの3つのルールは変えない）：
   1 建玉 = 目標 ÷ 翌日の値動きの見積もり（HAR 型：当日・5日・22日の値幅から。係数は 2018年までの先物のデータで決めて固定）
   2 VIX の状態で倍率（過去の分布の下 1/3 なら 0.5 倍、中 1.0 倍、上 1/3 なら 1.5 倍。VIX は1日前の終値）
-  3 毎日、その日の値動きの見積もりの 3 倍下に、逆指値を置き直す
+  3 毎日、その日の値動きの見積もりの 4 倍下に、逆指値を置き直す（急落への保険。3倍以下に近づけると成績が落ちる。index_stop.py）
 確かめること：
   A 改良を1つずつ足したときの成績（現物の3指数 26年、CFD の2指数 15年。全期間の値動きを年10%にそろえる）
   B 建玉の大きさの数式：
     - 伸びが最大になる大きさ（ケリー）：E[log(1 + λ·r)] が最大になる λ。r は「値動き年10%」のときの日次の損益
     - 下落を抑える条件つきのケリー（Busseti・Ryu・Boyd 2016年）：
       「資産が元の α 倍を下回る確率を β 以下にする」には、E[(1 + λ·r)^(−γ)] ≤ 1（γ = log β ÷ log α）を満たす最大の λ を使う
+      （この確率は「始めた時点の資産の α 倍を下回る」確率。途中の最高値からの下落は、これより大きくなる）
+    - 見込みの利益は、検証の値より小さいのがふつう（データから選んだ分だけ良く見える）。利益を半分に見積もった場合も出す
     - 過去の日次の損益を、かたまり（平均20日）ごとに並べ替えた 2万通りの3年間で、年率の中央値・最大の下落の分布を確かめる
 使い方: python3 tools/research/index_final.py  → reports/research/index_final.md
 """
@@ -28,7 +30,7 @@ import index_vix_sizing as V  # noqa: E402
 
 ANN = 252
 MULT = (0.5, 1.0, 1.5)
-K_STOP = 3.0
+K_STOP = 4.0
 
 
 def v60_sets(sets):
@@ -72,7 +74,7 @@ def main():
         head = "| 形 | シャープ | t 値 | 最悪の日 | 下位1%の日の平均 | 最大の下落 | 最悪の年 | プラスの年 | " + " | ".join(p[0] for p in per) + " |"
         lines += [f"## A {title}", "", head, "|---|" + "---|" * (7 + len(per))]
         for label, ss, mm, k in (("今の EA（直近60日の値動きで建玉を決める）", old, one, None), ("1 HAR 型の見積もりで建玉を決める", sets, one, None),
-                                 ("1＋2 VIX の状態で倍率", sets, vm, None), ("1＋3 逆指値 3×σ", sets, one, K_STOP),
+                                 ("1＋2 VIX の状態で倍率", sets, vm, None), ("1＋3 逆指値 4×σ", sets, one, K_STOP),
                                  ("**1＋2＋3（改良後の形）**", sets, vm, K_STOP)):
             s, z = V.stat(V.sleeve(ss, mm, kind, k), start, per)
             lines.append(f"| {label} | {s} |")
@@ -101,7 +103,8 @@ def main():
               "λ = 口座の値動きを年 (10 × λ)% にする倍率。伸び = E[log(1 + λ·r)] × 252（年率、対数）。", "",
               "| 形 | シャープ | 伸びが最大になる λ（ケリー） | そのときの値動き | 伸び（年率） | 半分のケリー：値動き・伸び | 条件つき：30%の下落を10%以下に | 50%の下落を5%以下に | 20%の下落を10%以下に |",
               "|---|---|---|---|---|---|---|---|---|"]
-    for label, zz in (("今の EA", z0), ("改良後の形", z)):
+    zh = z - z.mean() / 2.0                                  # 利益（平均）を半分に見積もった場合
+    for label, zz in (("今の EA", z0), ("改良後の形", z), ("改良後の形（利益を半分に見積もる）", zh)):
         gs = np.array([growth(zz, la) for la in lam])
         i = int(np.nanargmax(gs))
         half = lam[i] / 2.0
@@ -117,7 +120,16 @@ def main():
     lines += ["", "### 過去の日次の損益を並べ替えた 2万通り（改良後の形。かたまりの長さは平均20日）", "",
               "| 口座の値動き（年） | 3年後：年率の中央値 | 下位10% | 上位10% | 3年のあいだの最大の下落：中央値 | 下落が 20% を超える | 30% を超える | 50% を超える | 3年後に元本割れ | 過去26年の実際：最悪の日・最大の下落 |",
               "|---|---|---|---|---|---|---|---|---|---|"]
-    paths = block_bootstrap(z, 3, 20000)
+    for title, zz in (("検証どおりの利益", z), ("利益を半分に見積もった場合", zh)):
+        paths = block_bootstrap(zz, 3, 20000)
+        lines.append(f"| **{title}** | | | | | | | | | |")
+        table_rows(lines, zz, paths)
+    out = os.path.join(F.ROOT, "reports", "research", "index_final.md")
+    open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+    pd.DataFrame(keep).to_parquet(os.path.join(D.CACHE, "index_final_returns.parquet"))
+
+
+def table_rows(lines, z, paths):
     for vol in (5, 10, 15, 20, 30, 40, 60):
         la = vol / 10.0
         x = 1.0 + la * paths
@@ -130,9 +142,6 @@ def main():
                      f"{(dd < -0.2).mean() * 100:.0f}% | {(dd < -0.3).mean() * 100:.0f}% | {(dd < -0.5).mean() * 100:.1f}% | {(eq[:, -1] < 1).mean() * 100:.0f}% | "
                      f"{z.min() * la * 100:.1f}%・{(ez / ez.cummax() - 1).min() * 100:.0f}% |")
         print(lines[-1], flush=True)
-    out = os.path.join(F.ROOT, "reports", "research", "index_final.md")
-    open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
-    pd.DataFrame(keep).to_parquet(os.path.join(D.CACHE, "index_final_returns.parquet"))
 
 
 if __name__ == "__main__":

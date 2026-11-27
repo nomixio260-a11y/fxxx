@@ -16,6 +16,11 @@ $common = Join-Path $env:APPDATA 'MetaQuotes\Terminal\Common\Files'
 $outDir = Join-Path $repo $(if ($env:LIVE_OUT_DIR) { $env:LIVE_OUT_DIR } else { 'reports\live' })
 New-Item -ItemType Directory -Force -Path "$dir\MQL5\Presets", $common, $outDir | Out-Null
 Copy-Item "$repo\MQL5\Presets\*.set" "$dir\MQL5\Presets\" -Force
+# 株価指数の層（方式 8）は、VIX の日次の終値を共通フォルダのファイルから読む（98章）。回のたびに取り直す。
+#   取得できなくても止めない（EA は、ファイルがない・古いときは倍率 1.0 のまま動く）
+if ((Get-Content (Join-Path $repo "MQL5\Presets\$preset") -ErrorAction SilentlyContinue) -match '^\s*InpEntryMode\s*=\s*8\s*$') {
+  try { & (Join-Path $PSScriptRoot 'fetch_vix.ps1') } catch { Write-Host "注意：VIX の取得に失敗しました（$($_.Exception.Message)）" }
+}
 
 # 終わる時刻を決める（UTC、tools/ci/schedule.ps1）。
 #   取引の時間帯の途中で回を入れ替えない。UTC 4:00 ごろにサーバーごと止まる問題を避けるため、東京の朝の回は 3:35 までに終えて保存し、
