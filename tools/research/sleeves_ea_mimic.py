@@ -16,8 +16,9 @@
                次の日足の売買の時刻に、目標の建玉を持ち直す。スワップは払わず、代わりに毎日スプレッドを払う（0 = 使わない）
   AMS_SWAP=年率% … 買いの持ち越しのコストを、この値に置きかえる（例：4.79。金利の水準が違う場合の比べに使う）
   AMS_SPREAD_BP=値 … スプレッドを、値段に対する割合（1万分の1単位）で一定にする（例：0.6。固定のポイントだと、値段が低かった昔ほど割高になるため）
-  AMS_W=1,2,4 … ルールが 1つ・2つ・3つ 出ているときの建玉の単位（既定 1,2,3 = ルールの数に比例）
-  AMS_SOGUARD=0.9 … 強制ロスカットを避ける上限（Σ 建玉の額 ×（k × 1日の値動きの見積もり + 証拠金率 0.1）≤ 有効証拠金 × この係数。0 = 使わない）
+  AMS_W=1,2,4（既定）… ルールが 1つ・2つ・3つ 出ているときの建玉の単位（1,2,3 = ルールの数に比例）
+  AMS_SOGUARD=0.9（既定）… 強制ロスカットを避ける上限（Σ 建玉の額 ×（k × 1日の値動きの見積もり + 証拠金率 0.1）≤ 有効証拠金 × この係数。0 = 使わない）
+  AMS_LIMIT=倍率 … 買い増す分を、すぐ買わずに「売買の時刻の値段 −（その日の値動きの見積もり × 倍率）」の指値で待つ（その日のうちに届かなければ買わない。0 = 使わない）
 使い方: python3 tools/research/sleeves_ea_mimic.py [開始日 終了日 初期資金 1つ分の値動き% 順張りの値動き% 銘柄]
 """
 import os
@@ -45,8 +46,9 @@ SL_MUL = float(os.environ.get("AMS_SL", "4"))
 FLAT_MIN = float(os.environ.get("AMS_FLAT", "0"))
 SWAP_OVERRIDE = os.environ.get("AMS_SWAP")
 SPREAD_BP = os.environ.get("AMS_SPREAD_BP")
-RULE_W = [0.0] + [float(x) for x in os.environ.get("AMS_W", "1,2,3").split(",")]
-SO_GUARD = float(os.environ.get("AMS_SOGUARD", "0"))
+RULE_W = [0.0] + [float(x) for x in os.environ.get("AMS_W", "1,2,4").split(",")]
+SO_GUARD = float(os.environ.get("AMS_SOGUARD", "0.9"))
+LIMIT_MUL = float(os.environ.get("AMS_LIMIT", "0"))
 MARGIN_RATE = 0.1
 HAR = (0.37, 0.56, 0.20)                 # 当日・5日・22日の係数（先物 ES・NQ の 2000〜2018年で決めて固定。index_cfd_sizing.py）
 VIX_MULT = (0.5, 1.0, 1.5)               # VIX が過去の分布の下 1/3・中・上 1/3 のときの倍率
@@ -153,6 +155,7 @@ def main():
     swap_paid = 0.0
     spread_paid = 0.0
     so_cut = 0
+    filled = missed = 0
     tgt_store = {s: 0.0 for s in SYMS}
     sig_store = {s: 0.0 for s in SYMS}
     max_lev = 0.0
@@ -211,13 +214,12 @@ def main():
             sd = SIGD[s].loc[prev] if not np.isnan(SIGD[s].loc[prev]) else 0.0
             if SO_GUARD > 0 and tgt > 0:
                 kk = SL_MUL if SL_MUL > 0 else 4.0
-                used = sum(tgt_store[q] * (kk * sig_store[q] + MARGIN_RATE) for q in SYMS if q != s)
+                used = sum(tgt_store[q] * (kk * sig_store[q] + MARGIN_RATE) for q in SYMS if q != s)      # tgt_store は、実際に持つ分の額（最小の取引単位に届かない銘柄は 0）
                 allow = (SO_GUARD * eq - used) / (kk * sd + MARGIN_RATE)
                 if tgt > allow:
                     tgt = max(0.0, allow)
                     so_cut += 1
-            tgt_store[s], sig_store[s] = tgt, sd
-            max_lev = max(max_lev, sum(tgt_store.values()) / eq if eq > 0 else 0.0)
+            sig_store[s] = sd
             if OANDA:
                 CONTRACT_ = float(uj.loc[day])                     # 1 lot = 指数 × 1ドル → 円では 指数 × USDJPY
                 mn, st = LOTS.get(s, (0.01, 0.01))
@@ -228,15 +230,27 @@ def main():
                 CONTRACT_ = CONTRACT
                 lots = np.floor(tgt / (bid * CONTRACT_) / STEP + 1e-9) * STEP
             cur = units[s] / CONTRACT_
+            tgt_store[s] = lots * CONTRACT_ * bid
+            max_lev = max(max_lev, sum(tgt_store.values()) / eq if eq > 0 else 0.0)
             if lots <= 0:
                 if cur > 0:
                     cash += units[s] * bid
                     units[s] = 0.0
             elif chg or abs(cur - lots) > BAND * max(cur, lots):
                 if lots > cur:
-                    cash -= (lots - cur) * CONTRACT_ * (bid + spread)
-                    spread_paid += (lots - cur) * CONTRACT_ * spread
-                    trades += 1
+                    if LIMIT_MUL > 0 and sd > 0:
+                        lim = bid * (1.0 - LIMIT_MUL * sd)                 # 指値（買いは、売り値がここまで下がれば約定したとみなす）
+                        if row["low_after"] + spread <= lim:
+                            cash -= (lots - cur) * CONTRACT_ * lim
+                            trades += 1
+                            filled += 1
+                        else:
+                            lots = cur                                     # 届かなかった：買い増さない
+                            missed += 1
+                    else:
+                        cash -= (lots - cur) * CONTRACT_ * (bid + spread)
+                        spread_paid += (lots - cur) * CONTRACT_ * spread
+                        trades += 1
                 elif cur > lots:
                     cash += (cur - lots) * CONTRACT_ * bid
                 units[s] = lots * CONTRACT_
@@ -267,7 +281,7 @@ def main():
     print(f"銘柄 {','.join(SYMS)}、期間 {eq.index[0].date()}〜{eq.index[-1].date()}、初期資金 {deposit:,.0f} 円、戻り {unit}%・順張り {tunit}%、"
           f"値動きの見積もり {VOLMODEL}、VIX の倍率 {'あり' if USE_VIX else 'なし'}、逆指値 {SL_MUL:g}×σ（かかった回数 {stops}）")
     print(f"払ったスワップ {swap_paid:,.0f} 円、払ったスプレッド {spread_paid:,.0f} 円" + (f"、区切りの {FLAT_MIN:g} 分前に手じまい" if FLAT_MIN > 0 else "")
-          + f"、重み {RULE_W[1]:g}:{RULE_W[2]:g}:{RULE_W[3]:g}、目標の建玉の合計の最大 {max_lev:.1f} 倍" + (f"、強制ロスカットを避ける上限で縮めた回数 {so_cut}" if SO_GUARD > 0 else ""))
+          + f"、重み {RULE_W[1]:g}:{RULE_W[2]:g}:{RULE_W[3]:g}、目標の建玉の合計の最大 {max_lev:.1f} 倍" + (f"、指値 {LIMIT_MUL:g}×σ：約定 {filled}・届かず {missed}" if LIMIT_MUL > 0 else "") + (f"、強制ロスカットを避ける上限で縮めた回数 {so_cut}" if SO_GUARD > 0 else ""))
     print(f"最終の有効証拠金 {eq.iloc[-1]:,.0f} 円（損益 {eq.iloc[-1] - deposit:+,.0f} 円、{(eq.iloc[-1] / deposit - 1) * 100:+.1f}%）、買いの注文 {trades} 回、"
           f"最大の下落（日次の終値）{dd:.1f}%、年率シャープ {dr.mean() / dr.std() * np.sqrt(252):+.2f}、値動き 年{dr.std() * np.sqrt(252) * 100:.1f}%")
     print("年ごと（%）：" + "、".join(f"{k.year}年 {v:+.1f}" for k, v in yret.items()))

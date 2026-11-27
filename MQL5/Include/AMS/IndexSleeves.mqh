@@ -89,6 +89,7 @@ private:
    double            m_ruleW[4];       // ルールが 0・1・2・3 つ出ているときの建玉の単位
    double            m_soGuard;        // 強制ロスカットを避ける上限の、余裕の係数（0 で使わない）
    double            m_dvol[];         // 銘柄ごとの、最後に計算した1日の値動きの見積もり
+   double            m_tgtLots[];      // 銘柄ごとの、最後に決めた目標のロット（最小の取引単位に届かないときは 0）
    long              m_soCut;          // 上の上限で建玉を縮めた回数
    int               m_delaySec;       // 新しい日足が始まってから、売買するまで待つ秒数
    double            m_maxSpreadPct;   // スプレッドがこの割合（値段に対する %）を超えているあいだは待つ
@@ -221,10 +222,12 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    ArrayResize(m_warnAt, m_n);
    ArrayResize(m_flatDone, m_n);
    ArrayResize(m_dvol, m_n);
+   ArrayResize(m_tgtLots, m_n);
    for(int i = 0; i < m_n; i++)
      {
       m_flatDone[i] = 0;
       m_dvol[i] = 0.0;
+      m_tgtLots[i] = 0.0;
       for(int r = 0; r < IX_NR; r++)
          m_state[i][r] = 0;
       m_lastBar[i] = 0;
@@ -894,10 +897,11 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
    const double vmult = (nRev > 0) ? VixMult(rt[got - 1].time, vixNote) : 1.0;
    double tgt = equity * (m_ruleW[nRev] * m_revUnit * vmult + m_state[i][IX_TREND] * m_trendUnit) / 100.0 / annVol;
    m_dvol[i] = dailyVol;
+   //--- ほかの銘柄の建玉の額（最小の取引単位に届かず持っていない銘柄は、数えない）
    double others = 0.0;
    for(int k = 0; k < m_n; k++)
       if(k != i)
-         others += m_target[k];
+         others += m_tgtLots[k] * NotionalPerLot(m_sym[k]);
    if(m_maxLev > 0.0 && others + tgt > m_maxLev * equity)
      {
       tgt = MathMax(0.0, m_maxLev * equity - others);
@@ -917,13 +921,13 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
       double used = 0.0;
       for(int k = 0; k < m_n; k++)
         {
-         if(k == i || m_target[k] <= 0.0)
+         if(k == i || m_tgtLots[k] <= 0.0)
             continue;
          double mk = 0.0;
          const double nk = NotionalPerLot(m_sym[k]);
          if(nk <= 0.0 || !OrderCalcMargin(ORDER_TYPE_BUY, m_sym[k], 1.0, SymbolInfoDouble(m_sym[k], SYMBOL_ASK), mk))
             mk = 0.1 * nk;
-         used += m_target[k] * (kk * m_dvol[k] + so * ((nk > 0.0) ? mk / nk : 0.1));
+         used += m_tgtLots[k] * nk * (kk * m_dvol[k] + so * ((nk > 0.0) ? mk / nk : 0.1));
         }
       double mi = 0.0;
       if(!OrderCalcMargin(ORDER_TYPE_BUY, sym, 1.0, SymbolInfoDouble(sym, SYMBOL_ASK), mi))
@@ -940,6 +944,7 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
    m_target[i] = tgt;
    const double want = tgt / npl;
    double tl = NormalizeLots(sym, want);
+   m_tgtLots[i] = tl;
    if(want > 0.0 && tl <= 0.0)
       note += StringFormat(" （目標 %.3f lot が最小の取引単位 %.2f lot に届かないため、持たない）", want, SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN));
    int cdir = 0;

@@ -205,7 +205,7 @@ input double           InpIxVixLowMult      = 0.5;         // VIX が過去の�
 input double           InpIxVixHighMult     = 1.5;         // VIX が過去の分布の上 1/3 のときの、戻りの建玉の倍率
 input int              InpIxFlatMinutes     = 0;           // 持ち越しのコストを減らす：取引の区切りのこの分数前に手じまい、次の日足の判定のあとに持ち直す（0で使わない。99章）
 input double           InpIxFlatEdgeBp      = 0.0;         // 上の手じまいは、その夜のスワップがスプレッドよりこれだけ（値段の1万分の1単位）以上高いときだけ行う
-input string           InpIxRuleWeights     = "1,2,3";     // 戻り：ルールが 1つ・2つ・3つ 出ているときの建玉の単位（1,2,3 = ルールの数に比例。1,2,4 = 3つそろったときに厚くする。99章）
+input string           InpIxRuleWeights     = "1,2,4";     // 戻り：ルールが 1つ・2つ・3つ 出ているときの建玉の単位（1,2,4 = 3つそろったときに厚くする。1,2,3 = ルールの数に比例。99章）
 input double           InpIxSoGuard         = 0.9;         // 強制ロスカットを避ける上限：すべての建玉が逆指値にかかっても証拠金維持率がロスカットの水準を下回らない大きさに抑える（余裕の係数。0で使わない。99章）
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
 input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
