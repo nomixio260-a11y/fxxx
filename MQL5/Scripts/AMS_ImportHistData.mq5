@@ -131,7 +131,9 @@ void OnStart(void)
       r.high        = h;
       r.low         = l;
       r.close       = c;
-      r.tick_volume = (v > 0) ? v : 1;
+      //--- 出来高のないデータ（histdata）では、ティック数を 4 にする。1 のままだと、テスターが1分足を「1つの値段」だけで再現し、
+      //    テスト中の日足の高値・安値が、1分足の終値だけから作られてしまう（値幅を使う計算が、実際より小さくなる）
+      r.tick_volume = (v >= 4) ? v : 4;
       r.spread      = InpSpreadPts;
       r.real_volume = 0;
       rates[n++] = r;
