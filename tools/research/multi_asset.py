@@ -122,6 +122,37 @@ def main():
     both2 = both2[both2.index >= "2000-01-01"]
     lines.append(stats("株価指数の A（ずっと買い持ち）だけ", both2.iloc[:, 1], "2000-01-01"))
     lines.append(stats("為替の金利差（すべてのペア）と 株価指数の A（半分ずつ）", both2.mean(axis=1), "2000-01-01"))
+    # 金（histdata の XAUUSD の1分足から作った日足、2009年〜。CFD：買いは 短期金利＋年2.5% を払う。配当はない）
+    gpath = os.path.join(F.ROOT, "data", "XAUUSD_M1_2009.csv")
+    if os.path.exists(gpath):
+        g = pd.read_csv(gpath, header=None, usecols=[0, 5], names=["d", "c"])
+        gp = g.groupby("d")["c"].last()
+        gp.index = pd.to_datetime(gp.index, format="%Y.%m.%d")
+        gp = gp[gp.index.dayofweek < 5]
+        rate = short_rate("USD", gp.index)
+        one = pd.Series(1.0, index=gp.index)
+        ma = (gp > gp.rolling(200).mean()).astype(float)
+        ts = np.sign(gp / gp.shift(250) - 1.0).fillna(0.0)
+        gstart = str(gp.index[260].date())
+        lines += ["", f"## 金（XAUUSD、{gp.index[0].date()}〜{gp.index[-1].date()}）", "",
+                  "| 形 | " + " | ".join(p[0] for p in PER) + " | 全体 | t 値 | 負ける年 | 最大の下落 |", "|---|" + "---|" * (len(PER) + 4)]
+        for key, lab, pos in (("A", "ずっと買い持ち", one), ("B", "200日の平均より上のときだけ買い", weekly(ma)), ("C", "過去250日の向きに買い・売り", weekly(ts))):
+            r = pnl(pos, gp, rate, 0.0)
+            R[("金", key)] = r
+            lines.append(stats(f"金：{lab}", r, gstart))
+        # 3つの層（為替の金利差・株価指数・金）を同じ重みで（2010年〜）
+        gb = R[("金", "B")]
+        idx3 = idx.union(gb.index)
+        three = pd.concat([cr.reindex(idx3).fillna(0.0), eqb.reindex(idx3).fillna(0.0), gb.reindex(idx3).fillna(0.0)], axis=1)
+        three = three[three.index >= gstart]
+        three.columns = ["為替の金利差", "株価指数", "金"]
+        c3 = three.corr().round(2)
+        lines += ["", f"3つの層の相関（{gstart}〜、日次）：為替の金利差と株価指数 {c3.iloc[0, 1]:+.2f}、為替の金利差と金 {c3.iloc[0, 2]:+.2f}、株価指数と金 {c3.iloc[1, 2]:+.2f}", "",
+                  "| 形 | " + " | ".join(p[0] for p in PER) + " | 全体 | t 値 | 負ける年 | 最大の下落 |", "|---|" + "---|" * (len(PER) + 4)]
+        for c in three.columns:
+            lines.append(stats(f"{c}の層だけ（{gstart[:4]}年〜）", three[c], gstart))
+        lines.append(stats("為替の金利差と株価指数（半分ずつ）", three.iloc[:, :2].mean(axis=1), gstart))
+        lines.append(stats("3つの層を同じ重みで", three.mean(axis=1), gstart))
     out = os.path.join(F.ROOT, "reports", "research", "multi_asset.md")
     open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     print("\n".join(lines))
