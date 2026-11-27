@@ -1,0 +1,40 @@
+; AdaptiveMultiStrategyEA - index mean-reversion sleeve for the OANDA index CFD DEMO account (chapter 100).
+; Same settings as AMS_Sleeves_Index.set, plus InpIxEquityOffset=2500000.
+; Why: the demo account holds 3,000,000 JPY, but every test in reports/experiments.md used 500,000 JPY.
+;   With 3,000,000 JPY the same settings also hold the small positions that a 500,000 JPY account cannot (minimum lot sizes),
+;   so the risk is about twice that of the tests (3 years, real ticks: +244% with a 30% drawdown instead of +166% with 16%).
+;   With the offset, positions and limits are computed from (equity - 2,500,000), i.e. from 500,000 JPY plus profits and losses,
+;   and the Strategy Tester reproduces the 500,000 JPY results (run 730: +825,390 JPY vs +828,569 JPY).
+; If the demo balance is different, set InpIxEquityOffset = balance - 500000. To use the whole balance instead,
+;   use AMS_Sleeves_Index.set with a smaller InpIxRevUnitVol (see chapter 100, section 6).
+InpEntryMode=8
+InpIxRevSymbols=US500,US100,US30
+InpIxTrendSymbols=none
+InpIxRuleR2=true
+InpIxRuleD7=true
+InpIxRuleIBS=true
+InpIxRevUnitVol=8.75
+InpIxTrendUnitVol=0.0
+InpIxTrendCheckDays=7
+InpIxMaxLev=10.0
+InpIxBand=0.25
+InpIxSLVolMul=4.0
+InpIxVolModel=1
+InpIxVixFile=AMS_vix.csv
+InpIxVixLowMult=0.5
+InpIxVixHighMult=1.5
+InpIxRuleWeights=1,2,4
+InpIxSoGuard=0.9
+InpIxFlatMinutes=0
+InpIxFlatEdgeBp=0.0
+InpIxDelayMin=5
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=90.0
+InpIxJointRound=false
+InpIxJointEps=0.25
+InpIxWarmStart=true
+InpIxRegimeDays=1500
+InpIxRegimeThr=1.0
+InpIxRegimeRef=US500
+InpIxDryRun=false
+InpIxEquityOffset=2500000

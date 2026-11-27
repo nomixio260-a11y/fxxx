@@ -30,3 +30,4 @@ InpIxWarmStart=false
 InpIxRegimeDays=0
 InpIxRegimeRef=none
 InpIxDryRun=false
+InpIxEquityOffset=0

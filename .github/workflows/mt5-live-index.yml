@@ -10,6 +10,8 @@ name: MT5 Live Index (OANDA demo, index CFD)
 #   LIVE_IX_ENABLED=false を作る。実行中の回は Actions の画面から Cancel できる。
 # - 状態（自動調整の記録・月初の残高など）は、キャッシュで次の回に引き継ぐ。
 # - 成績は reports/live_index/summary.md にまとめて、このブランチにコミットする。
+# - 既定のプリセット（AMS_Sleeves_Index_Demo.set）は、残高 300万円のデモ口座を、検証と同じ元金 50万円として動かす形（100章）。
+# - 入力 trading=false なら、観察だけ（端末の設定で自動売買を禁止する。注文は一切出ない）。プリセットは AMS_Sleeves_Index_Observe.set を使う。
 
 on:
   workflow_dispatch:
@@ -19,9 +21,9 @@ on:
         required: false
         default: "330"
       preset:
-        description: "使うプリセット（MQL5/Presets のファイル名）"
+        description: "使うプリセット（MQL5/Presets のファイル名。既定は、残高300万円のデモ口座を元金50万円として動かす形）"
         required: false
-        default: "AMS_Sleeves_Index.set"
+        default: "AMS_Sleeves_Index_Demo.set"
       chain:
         description: "終わる前に次の回を起動して続けるか（true / false）"
         required: false
@@ -48,7 +50,7 @@ jobs:
       MT5_SERVER: ${{ secrets.MT5_IX_SERVER }}
       MT5_INSTALLER_URL: ${{ vars.MT5_INSTALLER_URL || 'https://download.mql5.com/cdn/web/oanda.corporation/mt5/oanda5setup.exe' }}
       LIVE_MINUTES: ${{ inputs.minutes || '330' }}
-      LIVE_PRESET: ${{ inputs.preset || 'AMS_Sleeves_Index.set' }}
+      LIVE_PRESET: ${{ inputs.preset || 'AMS_Sleeves_Index_Demo.set' }}
       LIVE_SYMBOL: US500
       LIVE_OUT_DIR: reports\live_index
       LIVE_ENABLED: ${{ vars.LIVE_IX_ENABLED || 'true' }}
