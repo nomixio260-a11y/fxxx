@@ -26,6 +26,11 @@ try {
   $now = (Get-Date).ToUniversalTime()
   $sch = [pscustomobject]@{ SleepUntil = $null; Start = $now; End = $now.AddMinutes($runMin); Note = 'fallback' }
 }
+# 30分以下の短い回（建玉の決済だけを行う回など）は、待たずにすぐ動かし、決めた分数で終える
+if ($runMin -le 30) {
+  $now = (Get-Date).ToUniversalTime()
+  $sch = [pscustomobject]@{ SleepUntil = $null; Start = $now; End = $now.AddMinutes($runMin); Note = 'short' }
+}
 if ($sch.SleepUntil) {
   Write-Host "UTC 4:00 ごろはサーバーが止まることがあるため、$($sch.SleepUntil.ToString('HH:mm')) UTC まで MT5 を起動せずに待ちます"
   $wait = ($sch.SleepUntil - (Get-Date).ToUniversalTime()).TotalSeconds

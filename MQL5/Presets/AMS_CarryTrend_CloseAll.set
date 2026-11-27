@@ -1,0 +1,19 @@
+; AdaptiveMultiStrategyEA - CLOSE ALL: entry mode 7 with an impossible carry threshold, so no pair qualifies and the first
+; rebalance (5 minutes after start) closes every position of this EA. Used on 2026-11-27 to stop demo trading (user decision).
+; Run once with chain=false. Do not use for trading.
+InpEntryMode=7
+InpSymbols=USDJPY,EURUSD,EURJPY,GBPJPY,AUDJPY,GBPUSD,AUDCAD,AUDNZD,AUDUSD,CADJPY,CHFJPY,EURGBP,NZDCAD,NZDJPY,NZDUSD,USDCAD,USDCHF
+InpCtTrendDays=60
+InpCtMinCarry=999.0
+InpCtTopK=5
+InpCtCrashMul=2.0
+InpCtVolTarget=20.0
+InpCtMaxLev=10.0
+InpCtRebalanceDays=7
+InpCtHour=3
+InpCtBand=0.25
+InpCtSLVolMul=6.0
+InpMaxMarginUsePct=90.0
+InpSplitOrders=true
+InpAsyncOrders=false
+InpCtDailyExit=false
