@@ -28,6 +28,9 @@ from scipy.stats import norm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("AMS_OANDA", "1")
 import fred_data as F  # noqa: E402
+import index_risk as IRK  # noqa: E402
+import index_stop as IS  # noqa: E402
+import index_vix_sizing as V  # noqa: E402
 import lot_rounding as LR  # noqa: E402
 
 ANN = 252
@@ -42,6 +45,45 @@ def boot_paths(R, n_path=20000, days=252, block=20, seed=11):
     n = R.shape[0]
     starts = rng.integers(0, n, size=(n_path, days // block + 1))
     return ((starts[:, :, None] + np.arange(block)[None, None, :]) % n).reshape(n_path, -1)[:, :days]
+
+
+def cash_returns(unit):
+    """現物の3指数・26年。EA と同じ形（重み 1:2:4・VIX の倍率・逆指値 4×σ・強制ロスカットを避ける上限）で持ったときの、口座の日次の損益。"""
+    sets = V.load_sets("cash")
+    W = {0: 0.0, 1: 1.0, 2: 2.0, 3: 4.0}
+    frac, need = {}, None
+    for name, (d, n, sg, rate, div) in sets.items():
+        vm = V.mult_of(V.vix_rank(d.index)[0], (0.5, 1.0, 1.5))
+        f = (n.map(lambda v: W[int(v)]) * (unit / 100.0) * vm / np.maximum(sg * np.sqrt(ANN), 0.025)).fillna(0.0)
+        frac[name] = f
+        x = (f * (LR.SL * sg + LR.MRATE)).fillna(0.0)
+        need = x if need is None else need.add(x, fill_value=0.0)
+    scale = (LR.GUARD / need).clip(upper=1.0).where(need > 0, 1.0)
+    parts = []
+    for name, (d, n, sg, rate, div) in sets.items():
+        w = frac[name] * scale.reindex(d.index).fillna(1.0)
+        r, _, _ = IS.run(d, w, sg, rate, div, LR.SL, "close")
+        parts.append(r)
+    r = pd.concat(parts, axis=1, sort=True).fillna(0.0).sum(axis=1)
+    return r[r.index >= IRK.START]
+
+
+def table_rows(lines, units, R, idx, P, win=None):
+    yrs = (idx[-1] - idx[0]).days / 365.25
+    for k, u in enumerate(units):
+        r = pd.Series(np.maximum(R[:, k], -0.999), index=idx)
+        e = (1.0 + r).cumprod()
+        roll = (e / e.shift(ANN) - 1.0).dropna()
+        fin = np.prod(1.0 + R[P, k], axis=1)
+        extra = ""
+        if win is not None:
+            x = e[(e.index >= win[0]) & (e.index <= win[1])]
+            rw = (x / x.shift(ANN) - 1.0).dropna()
+            extra = f" {(x.iloc[-1] / x.iloc[0] - 1) * 100:+.0f}%（下落 {(x / x.cummax() - 1).min() * 100:.0f}%、12か月の最高 {rw.max() * 100:+.0f}%） |"
+        lines.append(f"| {u:g}% | {(e.iloc[-1] ** (1 / yrs) - 1) * 100:+.1f}% | {r.std() * np.sqrt(ANN) * 100:.0f}% | {(e / e.cummax() - 1).min() * 100:.0f}% | {r.min() * 100:.1f}% | "
+                     f"{roll.max() * 100:+.0f}% | {roll.median() * 100:+.0f}% | {roll.min() * 100:+.0f}% | {(roll >= GOAL - 1).mean() * 100:.1f}% | "
+                     f"{(fin >= GOAL).mean() * 100:.2f}% | {(fin >= 2.0).mean() * 100:.1f}% | {(fin <= 0.5).mean() * 100:.1f}% | {(fin <= 0.2).mean() * 100:.1f}% | {np.median(fin) * 100 - 100:+.0f}% |{extra}")
+        print(lines[-1], flush=True)
 
 
 def main():
@@ -65,70 +107,71 @@ def main():
               "- どの行でも、1年で4倍に**必ず**届く持ち方は存在しない。確率を上げる方法は、「届かなければほぼ全額を失う」賭け方だけ。", ""]
 
     # ---------- 2 EA と同じ制約
-    eqs = {}
-    for u in UNITS:
-        eqs[u] = LR.simulate("floor", START, END, 1e10, u, return_eq=True)
-        print("sim", u, f"{eqs[u].iloc[-1] / 1e10:.2f}", flush=True)
+    cache = os.path.join(F.ROOT, "data", "target300_cfd.pkl")
+    if os.path.exists(cache):
+        eqs = pd.read_pickle(cache)
+    else:
+        eqs = {u: LR.simulate("floor", START, END, 1e10, u, return_eq=True) for u in UNITS}
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        pd.to_pickle(eqs, cache)
     idx = eqs[UNITS[0]].index
     R = np.column_stack([eqs[u].pct_change().fillna(0.0).values for u in UNITS])
     R = np.maximum(R, -0.999)
-    yrs = (idx[-1] - idx[0]).days / 365.25
     P = boot_paths(R)
-    lines += ["## 2 EA と同じ制約での、1年の成績（CFD の日足・2銘柄・15年。強制ロスカットを避ける上限あり）", "",
-              "| ルール1つ分 | 15年の年率の伸び | 口座の値動き（年） | 最大の下落 | 最悪の日 | 実際にあった12か月：最高 | 中央 | 最低 | +300% 以上だった12か月の割合 | "
-              "並べ替えた1年 20,000 本：+300% 以上 | +100% 以上 | −50% 以下 | −80% 以下 | 中央値 |", "|---|" + "---|" * 13]
-    for k, u in enumerate(UNITS):
-        e = eqs[u]
-        r = R[:, k]
-        roll = (e / e.shift(ANN) - 1.0).dropna()
-        fin = np.prod(1.0 + R[P, k], axis=1)
-        lines.append(f"| {u:g}% | {((e.iloc[-1] / e.iloc[0]) ** (1 / yrs) - 1) * 100:+.1f}% | {r.std() * np.sqrt(ANN) * 100:.0f}% | {(e / e.cummax() - 1).min() * 100:.0f}% | {r.min() * 100:.1f}% | "
-                     f"{roll.max() * 100:+.0f}% | {roll.median() * 100:+.0f}% | {roll.min() * 100:+.0f}% | {(roll >= GOAL - 1).mean() * 100:.1f}% | "
-                     f"{(fin >= GOAL).mean() * 100:.2f}% | {(fin >= 2.0).mean() * 100:.1f}% | {(fin <= 0.5).mean() * 100:.1f}% | {(fin <= 0.2).mean() * 100:.1f}% | {np.median(fin) * 100 - 100:+.0f}% |")
-        print(lines[-1], flush=True)
+    head = ("| ルール1つ分 | 年率の伸び | 口座の値動き（年） | 最大の下落 | 最悪の日 | 実際にあった12か月：最高 | 中央 | 最低 | +300% 以上だった12か月の割合 | "
+            "並べ替えた1年 20,000 本：+300% 以上 | +100% 以上 | −50% 以下 | −80% 以下 | 中央値 |")
+    lines += ["## 2 EA と同じ制約での、1年の成績（強制ロスカットを避ける上限あり。元金は大きくして、最小の取引単位の影響を除く）", "",
+              "### 2a CFD の日足・2銘柄（S&P500・NASDAQ100）・15年（2011年9月〜2026年10月）", "",
+              head + " うち 2023年11月〜2026年10月の3年 |", "|---|" + "---|" * 14]
+    table_rows(lines, UNITS, R, idx, P, win=("2023-11-01", "2026-10-30"))
+    # 現物の3指数・26年（2000年10月〜。2000〜02年・2008年を含む）
+    rc = {u: cash_returns(u) for u in UNITS}
+    idx_c = rc[UNITS[0]].index
+    Rc = np.maximum(np.column_stack([rc[u].values for u in UNITS]), -0.999)
+    Pc = boot_paths(Rc)
+    lines += ["", f"### 2b 現物の3指数・26年（{idx_c[0].date()}〜{idx_c[-1].date()}。2000〜02年・2008年の下げを含む）", "", head, "|---|" + "---|" * 13]
+    table_rows(lines, UNITS, Rc, idx_c, Pc)
 
     # ---------- 3 目標に届く確率を最大にする持ち方（動的計画法）。日は独立に選ぶ（並びの影響は、あとで並べ替えた道筋で確かめる）
-    grid = np.linspace(np.log(0.02), np.log(GOAL), 400)
-    logR = np.log1p(R)                                   # 日 × 設定
-    res = []
-    for floor in (None, 0.5):
-        V = (grid >= np.log(GOAL) - 1e-12).astype(float)
-        pol = np.zeros((ANN, len(grid)), dtype=np.int8)
-        for n in range(ANN):                             # 残り n+1 日
-            best = np.full(len(grid), -1.0)
-            for k in range(len(UNITS)):
-                nxt = grid[:, None] + logR[None, :, k]   # 資産 × 日
-                v = np.interp(nxt.ravel(), grid, V, left=0.0, right=1.0).reshape(nxt.shape).mean(axis=1)
-                upd = v > best + 1e-12
-                best[upd] = v[upd]
-                pol[ANN - 1 - n, upd] = k
-            best[grid >= np.log(GOAL) - 1e-12] = 1.0     # 届いたら、そこでやめる
-            if floor is not None:
-                best[grid <= np.log(floor)] = 0.0        # 半分になったら、そこでやめる
-            V = best
-        p0 = float(np.interp(0.0, grid, V))
-        # 並べ替えた道筋（20日のかたまり）で、この持ち方を実際に動かす
-        w = np.zeros(P.shape[0])
-        done = np.zeros(P.shape[0], dtype=bool)
-        used = []
-        for t in range(ANN):
-            gi = np.clip(np.searchsorted(grid, w), 0, len(grid) - 1)
-            k = pol[t, gi]
-            step = logR[P[:, t], k]
-            used.append(np.array(UNITS)[k][~done].mean() if (~done).any() else 0.0)
-            w = np.where(done, w, w + step)
-            done |= (w >= np.log(GOAL))
-            if floor is not None:
-                done |= (w <= np.log(floor))
-        fin = np.exp(w)
-        res.append((floor, p0, (fin >= GOAL - 1e-9).mean(), (fin <= 0.5 + 1e-9).mean(), (fin <= 0.2).mean(), np.median(fin), np.mean(used[:20]), np.mean(used)))
-        print(res[-1], flush=True)
     lines += ["", "## 3 「1年後に4倍」に届く確率を最大にする持ち方（毎日、資産と残りの日数を見て、大きさを選び直す）", "",
-              "| 条件 | 届く確率（計算の上） | 届く確率（並べ替えた道筋で動かした結果） | 半分以下で終わる確率 | 2割以下で終わる確率 | 1年後の資産の中央値 | 最初の20日に選んだ大きさの平均 | 1年を通した平均 |",
+              "| データ | 条件 | 届く確率（計算の上） | 届く確率（並べ替えた道筋で動かした結果） | 半分以下で終わる確率 | 2割以下で終わる確率 | 1年後の資産の中央値 | 選んだ大きさの平均 |",
               "|---|---|---|---|---|---|---|---|"]
-    for floor, p0, pg, p50, p20, med, u0, ua in res:
-        lines.append(f"| {'制限なし（EA の制約の中で、何をしてもよい）' if floor is None else '資産が半分になったら、そこでやめる'} | {p0 * 100:.1f}% | {pg * 100:.1f}% | {p50 * 100:.1f}% | {p20 * 100:.1f}% | "
-                     f"{med * 100 - 100:+.0f}% | {u0:.0f}% | {ua:.0f}% |")
+    grid = np.linspace(np.log(0.02), np.log(GOAL), 400)
+    for dlabel, RR, PP in (("CFD・2銘柄・15年", R, P), ("現物・3指数・26年", Rc, Pc)):
+        logR = np.log1p(RR)                              # 日 × 設定
+        for floor in (None, 0.5):
+            Vv = (grid >= np.log(GOAL) - 1e-12).astype(float)
+            pol = np.zeros((ANN, len(grid)), dtype=np.int8)
+            for n in range(ANN):                         # 残り n+1 日
+                best = np.full(len(grid), -1.0)
+                for k in range(len(UNITS)):
+                    nxt = grid[:, None] + logR[None, :, k]
+                    v = np.interp(nxt.ravel(), grid, Vv, left=0.0, right=1.0).reshape(nxt.shape).mean(axis=1)
+                    upd = v > best + 1e-12
+                    best[upd] = v[upd]
+                    pol[ANN - 1 - n, upd] = k
+                best[grid >= np.log(GOAL) - 1e-12] = 1.0 # 届いたら、そこでやめる
+                if floor is not None:
+                    best[grid <= np.log(floor)] = 0.0    # 半分になったら、そこでやめる
+                Vv = best
+            p0 = float(np.interp(0.0, grid, Vv))
+            w = np.zeros(PP.shape[0])
+            done = np.zeros(PP.shape[0], dtype=bool)
+            used = []
+            for t in range(ANN):
+                gi = np.clip(np.searchsorted(grid, w), 0, len(grid) - 1)
+                k = pol[t, gi]
+                step = logR[PP[:, t], k]
+                if (~done).any():
+                    used.append(np.array(UNITS)[k][~done].mean())
+                w = np.where(done, w, w + step)
+                done |= (w >= np.log(GOAL))
+                if floor is not None:
+                    done |= (w <= np.log(floor))
+            fin = np.exp(w)
+            lines.append(f"| {dlabel} | {'制限なし（EA の制約の中で、何をしてもよい）' if floor is None else '資産が半分になったら、そこでやめる'} | {p0 * 100:.1f}% | {(fin >= GOAL - 1e-9).mean() * 100:.1f}% | "
+                         f"{(fin <= 0.5 + 1e-9).mean() * 100:.1f}% | {(fin <= 0.2).mean() * 100:.1f}% | {np.median(fin) * 100 - 100:+.0f}% | {np.mean(used):.0f}% |")
+            print(lines[-1], flush=True)
     lines += ["", "- 一定の大きさで持つ形（2 の表）と比べて、届く確率は上がるが、代わりに、届かなかったときの損失が大きくなる。",
               "- どの持ち方でも、届く確率は 100% にならない。"]
     out = os.path.join(F.ROOT, "reports", "research", "target300.md")

@@ -1,0 +1,38 @@
+; AdaptiveMultiStrategyEA - index mean-reversion sleeve, MAXIMUM-GROWTH setting (chapter 101). HIGH RISK.
+; Same rules as AMS_Sleeves_Index.set. Differences: InpIxRevUnitVol=12.5 and the whole balance is used (InpIxEquityOffset=0).
+; This is the setting where growth peaked in the tests; larger values earned LESS and lost more.
+;   3,000,000 JPY, last 3 years, real ticks (run 749): +309% (about +59% per year), max drawdown 39%, worst month -22%,
+;   best 12 months +141%, worst 12 months +14%.
+;   Longer calculations (15 and 26 years): +28% to +31% per year with drawdowns of 46% to 62%.
+; "+300% in one year" did not happen in any 12-month window at any setting (chapter 101).
+InpEntryMode=8
+InpIxRevSymbols=US500,US100,US30
+InpIxTrendSymbols=none
+InpIxRuleR2=true
+InpIxRuleD7=true
+InpIxRuleIBS=true
+InpIxRevUnitVol=12.5
+InpIxTrendUnitVol=0.0
+InpIxTrendCheckDays=7
+InpIxMaxLev=10.0
+InpIxBand=0.25
+InpIxSLVolMul=4.0
+InpIxVolModel=1
+InpIxVixFile=AMS_vix.csv
+InpIxVixLowMult=0.5
+InpIxVixHighMult=1.5
+InpIxRuleWeights=1,2,4
+InpIxSoGuard=0.9
+InpIxFlatMinutes=0
+InpIxFlatEdgeBp=0.0
+InpIxDelayMin=5
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=90.0
+InpIxJointRound=false
+InpIxJointEps=0.25
+InpIxWarmStart=true
+InpIxRegimeDays=1500
+InpIxRegimeThr=1.0
+InpIxRegimeRef=US500
+InpIxDryRun=false
+InpIxEquityOffset=0
