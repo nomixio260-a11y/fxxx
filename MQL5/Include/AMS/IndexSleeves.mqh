@@ -1408,6 +1408,56 @@ void CIndexSleeves::Reconstruct(const int i, const bool upToProcessed = true)
   }
 
 //+------------------------------------------------------------------+
+//| 翌日の値動きの大きさの見積もり（1日の標準偏差）。rt は古い順、         |
+//| 最後の要素が、最後に確定した日足                                      |
+//+------------------------------------------------------------------+
+double CIndexSleeves::DailyVol(const MqlRates &rt[], const int got)
+  {
+   double dailyVol = 0.0;
+   if(m_volModel == 1)
+     {
+      //--- HAR 型：その日の分散 = 値幅から計算した分散（Garman–Klass）＋ 前の終値から始値までの動きの2乗
+      double dv[22];
+      for(int q = 0; q < 22; q++)
+        {
+         const int    k  = got - 22 + q;
+         const double o  = rt[k].open, h = rt[k].high, l = rt[k].low, cl = rt[k].close, pc = rt[k - 1].close;
+         if(h > l && l > 0.0 && o > 0.0 && pc > 0.0)
+           {
+            const double hl = MathLog(h / l), co = MathLog(cl / o), on = MathLog(o / pc);
+            dv[q] = MathMax(0.5 * hl * hl - 0.3862943611198906 * co * co, 0.0) + on * on;
+           }
+         else
+           {
+            const double cc = (pc > 0.0 && cl > 0.0) ? MathLog(cl / pc) : 0.0;
+            dv[q] = cc * cc;
+           }
+        }
+      double m5 = 0.0, m22 = 0.0;
+      for(int q = 17; q < 22; q++)
+         m5 += dv[q];
+      for(int q = 0; q < 22; q++)
+         m22 += dv[q];
+      const double var = 0.37 * dv[21] + 0.56 * m5 / 5.0 + 0.20 * m22 / 22.0;
+      dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
+     }
+   else
+     {
+      //--- 直近60日の値動きの大きさ
+      double sum = 0.0, sum2 = 0.0;
+      for(int k = got - 60; k < got; k++)
+        {
+         const double r = rt[k].close / rt[k - 1].close - 1.0;
+         sum  += r;
+         sum2 += r * r;
+        }
+      const double var = (sum2 - sum * sum / 60.0) / 59.0;
+      dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
+     }
+   return(dailyVol);
+  }
+
+//+------------------------------------------------------------------+
 //| 観察モード：過去 days 日分の判定を、口座の日足の履歴からやり直して      |
 //| ログに出す（テスターの同じ日の判定と突き合わせる。状態は変えない）       |
 //+------------------------------------------------------------------+
