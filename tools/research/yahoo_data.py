@@ -57,6 +57,13 @@ def fetch(name):
     return pd.read_csv(path, index_col=0, parse_dates=True)
 
 
+def fetch_ticker(name, ticker):
+    """TICKERS にないティッカーを、名前を付けて取得する（例：fetch_ticker("TRY", "TRY=X")）。"""
+    if name not in TICKERS:
+        TICKERS[name] = (ticker, name)
+    return fetch(name)
+
+
 def main():
     for name, (tk, desc) in TICKERS.items():
         try:
