@@ -1,0 +1,2 @@
+run=790 mode=backtest period=H1 model=4 exec=0 from=2023.11.01 to=2026.11.13 symbols=default deposit=3000000 preset=AMS_Sleeves_Index.set inputs=InpIxTestRestartMin=330;InpIxTestLoseState=true account=index leverage=10
+RESULT なし（テスト失敗）
