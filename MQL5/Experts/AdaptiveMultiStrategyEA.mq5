@@ -203,6 +203,8 @@ input int              InpIxVolModel        = 1;           // 建玉を決める
 input string           InpIxVixFile         = "AMS_vix.csv"; // VIX の日次の終値（共通フォルダのファイル。行は「日付,終値」。none・ファイルなしなら倍率 1.0）
 input double           InpIxVixLowMult      = 0.5;         // VIX が過去の分布の下 1/3 のときの、戻りの建玉の倍率
 input double           InpIxVixHighMult     = 1.5;         // VIX が過去の分布の上 1/3 のときの、戻りの建玉の倍率
+input int              InpIxFlatMinutes     = 0;           // 持ち越しのコストを減らす：取引の区切りのこの分数前に手じまい、次の日足の判定のあとに持ち直す（0で使わない。99章）
+input double           InpIxFlatEdgeBp      = 0.0;         // 上の手じまいは、その夜のスワップがスプレッドよりこれだけ（値段の1万分の1単位）以上高いときだけ行う
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
 input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
 
@@ -1330,7 +1332,8 @@ int OnInit(void)
       if(!g_sleeves.Init(GetPointer(g_trade), InpMagic, revSyms, trendSyms, InpIxRuleR2, InpIxRuleD7, InpIxRuleIBS, InpIxRevUnitVol,
                          InpIxTrendUnitVol, InpIxTrendCheckDays, InpIxMaxLev, InpMaxMarginUsePct, InpIxBand, InpIxSLVolMul,
                          InpIxDelayMin, InpIxMaxSpreadPct, InpIxVolModel,
-                         (InpIxVixFile == "none" || InpIxVixFile == "-") ? "" : InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult))
+                         (InpIxVixFile == "none" || InpIxVixFile == "-") ? "" : InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult,
+                         InpIxFlatMinutes, InpIxFlatEdgeBp))
         {
          Print("[AMS] 指数の層：取引できる銘柄がありません");
          return(INIT_FAILED);
@@ -1408,6 +1411,8 @@ int OnInit(void)
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   if(g_sleevesMode)
+      g_sleeves.Summary();
    if(!MQLInfoInteger(MQL_TESTER))
      {
       SaveState();

@@ -10,7 +10,12 @@
 - 98章の改良（EA の入力と同じ。環境変数で切り替える）：
   AMS_VOL=har（既定）／v60 … 建玉を決める値動きの見積もり。har = 当日・5日・22日の「値幅から計算した分散」の一次式（係数は固定）
   AMS_VIX=1（既定）／0 … VIX の状態で、戻りの建玉を 0.5 倍・1.0 倍・1.5 倍にする（VIX は、判定する日足より前の日の終値）
-  AMS_SL=3（既定）／0 … 毎日、売買の値段から「その日の値動きの見積もり × この倍率」だけ下に逆指値を置き直す
+  AMS_SL=4（既定）／0 … 毎日、売買の値段から「その日の値動きの見積もり × この倍率」だけ下に逆指値を置き直す
+- 99章の検証（環境変数）：
+  AMS_FLAT=分 … 持ち越しのコスト（スワップ）がかかる瞬間（日々の区切り）に建玉を持たない形。その日の最後の足の「分」前に、いったんすべて手じまい、
+               次の日足の売買の時刻に、目標の建玉を持ち直す。スワップは払わず、代わりに毎日スプレッドを払う（0 = 使わない）
+  AMS_SWAP=年率% … 買いの持ち越しのコストを、この値に置きかえる（例：4.79。金利の水準が違う場合の比べに使う）
+  AMS_SPREAD_BP=値 … スプレッドを、値段に対する割合（1万分の1単位）で一定にする（例：0.6。固定のポイントだと、値段が低かった昔ほど割高になるため）
 使い方: python3 tools/research/sleeves_ea_mimic.py [開始日 終了日 初期資金 1つ分の値動き% 順張りの値動き% 銘柄]
 """
 import os
@@ -34,7 +39,10 @@ CONTRACT, STEP, BAND, DELAY_MIN = 100.0, 0.01, 0.25, 5
 OANDA = os.environ.get("AMS_OANDA") == "1"
 VOLMODEL = os.environ.get("AMS_VOL", "har")
 USE_VIX = os.environ.get("AMS_VIX", "1") == "1"
-SL_MUL = float(os.environ.get("AMS_SL", "3"))
+SL_MUL = float(os.environ.get("AMS_SL", "4"))
+FLAT_MIN = float(os.environ.get("AMS_FLAT", "0"))
+SWAP_OVERRIDE = os.environ.get("AMS_SWAP")
+SPREAD_BP = os.environ.get("AMS_SPREAD_BP")
 HAR = (0.37, 0.56, 0.20)                 # 当日・5日・22日の係数（先物 ES・NQ の 2000〜2018年で決めて固定。index_cfd_sizing.py）
 VIX_MULT = (0.5, 1.0, 1.5)               # VIX が過去の分布の下 1/3・中・上 1/3 のときの倍率
 LOTS = {"US500_HD": (1.0, 0.01), "US100_HD": (0.1, 0.1)}        # 最小の取引単位, 刻み
@@ -68,6 +76,14 @@ def prepare(pair):
     lo = m["l"].copy()
     lo[m.index.values < d["px_time"].reindex(day).values] = np.inf
     d["low_after"] = lo.groupby(day).min()
+    # 日々の区切りの前に手じまう場合の値段：その日の最後の足の FLAT_MIN 分前までの、最後の足の終値
+    last = pd.Series(m.index, index=m.index).groupby(day).last()
+    wantf = last - pd.Timedelta(minutes=max(FLAT_MIN, 0.0))
+    posf = np.searchsorted(m.index.values, wantf.values, side="right") - 1
+    posf = np.clip(posf, 0, len(m) - 1)
+    d["px_flat"] = m["c"].values[posf]
+    d.loc[pd.DatetimeIndex(m.index.values[posf]).normalize() != d.index, "px_flat"] = np.nan
+    d.loc[m.index.values[posf] <= d["px_time"].values, "px_flat"] = np.nan              # 売買の時刻より前になる日（足の少ない日）は、手じまわない
     return d
 
 
@@ -129,6 +145,10 @@ def main():
     VM = vix_mult(days)
     days = [x for x in days if pd.Timestamp(start) <= x <= pd.Timestamp(end)]
     stops = 0
+    swap_paid = 0.0
+    spread_paid = 0.0
+    if SWAP_OVERRIDE is not None:
+        SYMS = {k: (v[0], v[1], -abs(float(SWAP_OVERRIDE))) for k, v in SYMS.items()}
     cash = deposit
     units = {s: 0.0 for s in SYMS}
     last_close = {s: np.nan for s in SYMS}
@@ -146,6 +166,7 @@ def main():
             for s, (_, _, swl) in SYMS.items():
                 if units[s] > 0 and not np.isnan(last_close[s]):
                     cash += units[s] * last_close[s] * swl / 100.0 / 360.0 * mult
+                    swap_paid -= units[s] * last_close[s] * swl / 100.0 / 360.0 * mult
         for s, (_, spread, _) in SYMS.items():
             d = D[s]
             if day not in d.index:
@@ -170,6 +191,8 @@ def main():
             started[s] = True
             vol = VOL[s].loc[prev]
             bid = row["px"]
+            if SPREAD_BP is not None:
+                spread = bid * float(SPREAD_BP) / 1e4
             eq = cash
             for q in SYMS:
                 if units[q] > 0:
@@ -193,6 +216,7 @@ def main():
             elif chg or abs(cur - lots) > BAND * max(cur, lots):
                 if lots > cur:
                     cash -= (lots - cur) * CONTRACT_ * (bid + spread)
+                    spread_paid += (lots - cur) * CONTRACT_ * spread
                     trades += 1
                 elif cur > lots:
                     cash += (cur - lots) * CONTRACT_ * bid
@@ -204,6 +228,10 @@ def main():
                     cash += units[s] * level
                     units[s] = 0.0
                     stops += 1
+            # 日々の区切りの前に、いったん手じまう（スワップがかかる瞬間に建玉を持たない）
+            if FLAT_MIN > 0 and units[s] > 0 and not np.isnan(row["px_flat"]):
+                cash += units[s] * row["px_flat"]
+                units[s] = 0.0
         for s in SYMS:
             if day in D[s].index:
                 last_close[s] = D[s].loc[day, "close"]
@@ -219,6 +247,7 @@ def main():
     dr = eq.pct_change().dropna()
     print(f"銘柄 {','.join(SYMS)}、期間 {eq.index[0].date()}〜{eq.index[-1].date()}、初期資金 {deposit:,.0f} 円、戻り {unit}%・順張り {tunit}%、"
           f"値動きの見積もり {VOLMODEL}、VIX の倍率 {'あり' if USE_VIX else 'なし'}、逆指値 {SL_MUL:g}×σ（かかった回数 {stops}）")
+    print(f"払ったスワップ {swap_paid:,.0f} 円、払ったスプレッド {spread_paid:,.0f} 円" + (f"、区切りの {FLAT_MIN:g} 分前に手じまい" if FLAT_MIN > 0 else ""))
     print(f"最終の有効証拠金 {eq.iloc[-1]:,.0f} 円（損益 {eq.iloc[-1] - deposit:+,.0f} 円、{(eq.iloc[-1] / deposit - 1) * 100:+.1f}%）、買いの注文 {trades} 回、"
           f"最大の下落（日次の終値）{dd:.1f}%、年率シャープ {dr.mean() / dr.std() * np.sqrt(252):+.2f}、値動き 年{dr.std() * np.sqrt(252) * 100:.1f}%")
     print("年ごと（%）：" + "、".join(f"{k.year}年 {v:+.1f}" for k, v in yret.items()))

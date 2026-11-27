@@ -28,6 +28,12 @@
 //|    前の日の終値だけを使う。ファイルがない・古いときは 1.0 倍。              |
 //|  3 逆指値：毎日、売買の時点の値段から「その日の値動きの見積もり × k」       |
 //|    だけ下に置き直す（1日の損失の上限を決める。EA が止まっていても効く）。    |
+//|                                                                  |
+//| 持ち越しのコスト（スワップ）を減らす仕組み（99章。使うかどうかは入力で選ぶ）：|
+//|  スワップは、日々の取引の区切り（サーバーの日付が変わる時）に持っている      |
+//|  建玉にかかる。そこで、その夜のスワップが、持ち直すときのスプレッドより      |
+//|  高いときだけ、区切りの数分前にいったん手じまい、次の日足の判定のあとに      |
+//|  持ち直す。何を買うかの判断（ルール）は変えない。                          |
 //+------------------------------------------------------------------+
 #ifndef AMS_INDEXSLEEVES_MQH
 #define AMS_INDEXSLEEVES_MQH
@@ -67,6 +73,11 @@ private:
    double            m_vixVal[];       // VIX の終値
    datetime          m_vixTried;       // VIX のファイルを最後に読み直した時刻
    datetime          m_vixWarnAt;
+   int               m_flatMin;        // 日々の区切りの何分前に手じまうか（0 で使わない）
+   double            m_flatEdgeBp;     // スワップがスプレッドをこれだけ（値段の1万分の1単位）上回るときだけ手じまう
+   datetime          m_flatDone[];     // 区切りの前の判断を済ませた日足の時刻
+   long              m_flatCount;      // 区切りの前に手じまった回数
+   long              m_flatSkip;       // スワップのほうが安いので持ち越した回数
    int               m_delaySec;       // 新しい日足が始まってから、売買するまで待つ秒数
    double            m_maxSpreadPct;   // スプレッドがこの割合（値段に対する %）を超えているあいだは待つ
    int               m_state[][IX_NR]; // ルールごとの状態（1 = 持つ）
@@ -85,6 +96,9 @@ private:
    void              OpenLots(const string sym, double lots, const double dailyVol);
    void              ReduceLots(const string sym, double lots);
    void              ApplyStops(const string sym, const double dailyVol);
+   datetime          SessionEnd(const string sym, const datetime t0);
+   double            SwapTonightPct(const string sym, const datetime t0);
+   void              FlatBeforeRollover(const int i, const datetime now);
    int               LoadVix(void);
    double            VixMult(const datetime barDate, string &note);
    bool              Process(const int i, const datetime t0);
@@ -99,8 +113,10 @@ public:
                           const bool useR2, const bool useD7, const bool useIBS, const double revUnit, const double trendUnit,
                           const int trendDays, const double maxLev, const double maxMarginPct, const double band,
                           const double slVolMul, const int delayMin, const double maxSpreadPct,
-                          const int volModel, const string vixFile, const double vixLow, const double vixHigh);
+                          const int volModel, const string vixFile, const double vixLow, const double vixHigh,
+                          const int flatMin, const double flatEdgeBp);
    void              OnTick(void);
+   void              Summary(void);
   };
 
 //+------------------------------------------------------------------+
@@ -108,7 +124,8 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                          const bool useR2, const bool useD7, const bool useIBS, const double revUnit, const double trendUnit,
                          const int trendDays, const double maxLev, const double maxMarginPct, const double band,
                          const double slVolMul, const int delayMin, const double maxSpreadPct,
-                         const int volModel, const string vixFile, const double vixLow, const double vixHigh)
+                         const int volModel, const string vixFile, const double vixLow, const double vixHigh,
+                         const int flatMin, const double flatEdgeBp)
   {
    m_trade        = trade;
    m_magic        = magic;
@@ -130,6 +147,10 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_vixHigh      = vixHigh;
    m_vixTried     = 0;
    m_vixWarnAt    = 0;
+   m_flatMin      = (int)MathMax(0, flatMin);
+   m_flatEdgeBp   = flatEdgeBp;
+   m_flatCount    = 0;
+   m_flatSkip     = 0;
    ArrayResize(m_vixDate, 0);
    ArrayResize(m_vixVal, 0);
    m_stateFile    = StringFormat("AMS_ix_state_%I64u.csv", magic);
@@ -168,8 +189,10 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    ArrayResize(m_trendCheck, m_n);
    ArrayResize(m_target, m_n);
    ArrayResize(m_warnAt, m_n);
+   ArrayResize(m_flatDone, m_n);
    for(int i = 0; i < m_n; i++)
      {
+      m_flatDone[i] = 0;
       for(int r = 0; r < IX_NR; r++)
          m_state[i][r] = 0;
       m_lastBar[i] = 0;
@@ -189,6 +212,14 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                   (int)AccountInfoInteger(ACCOUNT_LEVERAGE),
                   (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_MODE), SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_LONG),
                   SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_SHORT));
+      //--- スワップの曜日ごとの倍率と、取引の区切りの時刻（区切りの前の手じまいの判断に使う値）
+      const datetime b0 = iTime(m_sym[i], PERIOD_D1, 0);
+      PrintFormat("[AMS] 指数の層：%s スワップの倍率（日〜土）%.0f/%.0f/%.0f/%.0f/%.0f/%.0f/%.0f（3日分の曜日の設定 %d）、今日の取引の終わり %s、今夜のスワップ 値段の %.4f%%",
+                  m_sym[i], SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_SUNDAY), SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_MONDAY),
+                  SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_TUESDAY), SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_WEDNESDAY),
+                  SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_THURSDAY), SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_FRIDAY),
+                  SymbolInfoDouble(m_sym[i], SYMBOL_SWAP_SATURDAY), (int)SymbolInfoInteger(m_sym[i], SYMBOL_SWAP_ROLLOVER3DAYS),
+                  b0 > 0 ? TimeToString(SessionEnd(m_sym[i], b0), TIME_MINUTES) : "?", b0 > 0 ? SwapTonightPct(m_sym[i], b0) : 0.0);
      }
    if(!MQLInfoInteger(MQL_TESTER))
       LoadState();
@@ -213,6 +244,9 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
                (vixRows >= 500 ? StringFormat("%s（%d 日分、最後の日付 %s）。下 1/3 で %.2f 倍・上 1/3 で %.2f 倍", m_vixFile, vixRows,
                                               TimeToString(m_vixDate[vixRows - 1], TIME_DATE), m_vixLow, m_vixHigh)
                 : StringFormat("%s が読めない・足りない（%d 日分）ため、1.0 倍のまま", m_vixFile, vixRows)));
+   if(m_flatMin > 0)
+      PrintFormat("[AMS] 指数の層：その夜のスワップがスプレッドより値段の %.2f/10000 以上高いときは、取引の区切りの %d 分前に手じまい、次の日足の判定のあとに持ち直します",
+                  m_flatEdgeBp, m_flatMin);
    return(m_n > 0);
   }
 
@@ -469,6 +503,102 @@ double CIndexSleeves::VixMult(const datetime barDate, string &note)
    const double mult = (rank < 1.0 / 3.0) ? m_vixLow : ((rank >= 2.0 / 3.0) ? m_vixHigh : 1.0);
    note = StringFormat("VIX %.2f（%s、過去の分布での位置 %.2f）→ %.2f 倍", m_vixVal[j], TimeToString(m_vixDate[j], TIME_DATE), rank, mult);
    return(mult);
+  }
+
+//+------------------------------------------------------------------+
+//| 今日の取引の終わりの時刻（銘柄の取引時間の表から。なければ日付の変わり目）   |
+//+------------------------------------------------------------------+
+datetime CIndexSleeves::SessionEnd(const string sym, const datetime t0)
+  {
+   MqlDateTime dt;
+   TimeToStruct(t0, dt);
+   long best = -1;
+   for(uint idx = 0; idx < 10; idx++)
+     {
+      datetime from = 0, to = 0;
+      if(!SymbolInfoSessionTrade(sym, (ENUM_DAY_OF_WEEK)dt.day_of_week, idx, from, to))
+         break;
+      if((long)to > best)
+         best = (long)to;
+     }
+   if(best <= 0 || best > 86400)
+      best = 86400;
+   return((datetime)((long)t0 + best));
+  }
+
+//+------------------------------------------------------------------+
+//| 今夜、買いの建玉を持ち越すとかかるスワップ（値段に対する %。受け取りなら 0。  |
+//| 計算できない方式なら −1）                                            |
+//+------------------------------------------------------------------+
+double CIndexSleeves::SwapTonightPct(const string sym, const datetime t0)
+  {
+   const double sl = SymbolInfoDouble(sym, SYMBOL_SWAP_LONG);
+   if(sl >= 0.0)
+      return(0.0);
+   MqlDateTime dt;
+   TimeToStruct(t0, dt);
+   double mult = 0.0, sum = 0.0;
+   const double w[7] = {SymbolInfoDouble(sym, SYMBOL_SWAP_SUNDAY), SymbolInfoDouble(sym, SYMBOL_SWAP_MONDAY), SymbolInfoDouble(sym, SYMBOL_SWAP_TUESDAY),
+                        SymbolInfoDouble(sym, SYMBOL_SWAP_WEDNESDAY), SymbolInfoDouble(sym, SYMBOL_SWAP_THURSDAY),
+                        SymbolInfoDouble(sym, SYMBOL_SWAP_FRIDAY), SymbolInfoDouble(sym, SYMBOL_SWAP_SATURDAY)};
+   for(int k = 0; k < 7; k++)
+      sum += w[k];
+   if(sum > 0.0)
+      mult = w[dt.day_of_week];
+   else
+      mult = (dt.day_of_week == (int)SymbolInfoInteger(sym, SYMBOL_SWAP_ROLLOVER3DAYS)) ? 3.0 : 1.0;
+   const int    mode = (int)SymbolInfoInteger(sym, SYMBOL_SWAP_MODE);
+   const double bid  = SymbolInfoDouble(sym, SYMBOL_BID);
+   if(mode == SYMBOL_SWAP_MODE_INTEREST_CURRENT || mode == SYMBOL_SWAP_MODE_INTEREST_OPEN)
+      return(-sl / 360.0 * mult);
+   if(mode == SYMBOL_SWAP_MODE_POINTS && bid > 0.0)
+      return(-sl * SymbolInfoDouble(sym, SYMBOL_POINT) / bid * 100.0 * mult);
+   return(-1.0);
+  }
+
+//+------------------------------------------------------------------+
+//| 取引の区切りの前：今夜のスワップが、持ち直すときのスプレッドより高ければ、   |
+//| いったん手じまう（次の日足の判定で、ルールが続いていれば持ち直す）          |
+//+------------------------------------------------------------------+
+void CIndexSleeves::FlatBeforeRollover(const int i, const datetime now)
+  {
+   const string   sym = m_sym[i];
+   const datetime t0  = iTime(sym, PERIOD_D1, 0);
+   if(t0 <= 0 || m_flatDone[i] == t0)
+      return;
+   const datetime endT = SessionEnd(sym, t0);
+   if((long)now < (long)endT - (long)m_flatMin * 60 || now >= endT)
+      return;
+   int dir = 0;
+   if(CurrentLots(sym, dir) <= 0.0 || dir <= 0)
+     {
+      m_flatDone[i] = t0;
+      return;
+     }
+   MqlTick tk;
+   if(!SymbolInfoTick(sym, tk) || tk.bid <= 0.0 || tk.ask <= 0.0 || (long)now - (long)tk.time > 120)
+      return;                                           // 値段が動いていない（市場が閉じている）あいだは、何もしない
+   const double spreadPct = (tk.ask - tk.bid) / tk.bid * 100.0;
+   const double swapPct   = SwapTonightPct(sym, t0);
+   if(swapPct < 0.0 || swapPct <= spreadPct + m_flatEdgeBp / 100.0)
+     {
+      m_flatDone[i] = t0;
+      m_flatSkip++;
+      return;                                           // スワップのほうが安い（または計算できない）ので、そのまま持ち越す
+     }
+   CloseSymbol(sym, StringFormat("区切りの前の手じまい（今夜のスワップ %.4f%% > スプレッド %.4f%%）", swapPct, spreadPct));
+   if(CurrentLots(sym, dir) <= 0.0)
+     {
+      m_flatDone[i] = t0;
+      m_flatCount++;
+     }
+  }
+
+//+------------------------------------------------------------------+
+void CIndexSleeves::Summary(void)
+  {
+   if(m_flatMin > 0)
+      PrintFormat("[AMS] 指数の層：区切りの前に手じまった回数 %I64d、スワップのほうが安くて持ち越した回数 %I64d", m_flatCount, m_flatSkip);
   }
 
 //+------------------------------------------------------------------+
@@ -799,6 +929,8 @@ void CIndexSleeves::OnTick(void)
    bool saved = false;
    for(int i = 0; i < m_n; i++)
      {
+      if(m_flatMin > 0)
+         FlatBeforeRollover(i, now);
       const datetime t0 = iTime(m_sym[i], PERIOD_D1, 0);
       if(t0 <= 0 || t0 == m_lastBar[i])
          continue;
