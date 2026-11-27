@@ -141,6 +141,13 @@ private:
    int               m_expTries[];     // 試した回数
    bool              m_expDone[];      // 書き出しが済んだか
    datetime          m_expAt;          // 最後に試した時刻
+   bool              m_tradeFail;      // 直前の売買の手順の中で、注文・決済・逆指値の変更に失敗したか
+   int               m_retryCount[];   // その日足で、売買をやり直した回数
+   datetime          m_retryAt[];      // 次にやり直してよい時刻
+   bool              m_retryChanged[]; // 失敗した回に「ルールの出入り」があったか（やり直しのときも、必ず建玉を直す）
+   datetime          m_jointRetryAt;   // まとめて丸める形：次にやり直してよい時刻
+   long              m_retryBars;      // 注文の失敗で、やり直しになった回数（銘柄 × 日）
+   long              m_retryGiveUp;    // やり直しの上限に達して、その日はあきらめた回数
    int               m_testRestartSec; // 検証用：この秒数ごとに「EA の起動し直し」を再現する（0 で使わない）
    bool              m_testLoseState;  // 検証用：起動し直しのとき、状態のファイルも失われたものとする
    datetime          m_testRestartAt;  // 検証用：最後に再現した時刻
@@ -245,6 +252,10 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_regThr       = (m_regDays > 0) ? regimeThr / MathSqrt((double)m_regDays) : 0.0;
    m_regRef       = regimeRef;
    m_eqOffset     = MathMax(0.0, equityOffset);
+   m_tradeFail    = false;
+   m_jointRetryAt = 0;
+   m_retryBars    = 0;
+   m_retryGiveUp  = 0;
    m_testRestartSec = (int)MathMax(0, testRestartMin) * 60;
    m_testLoseState  = testLoseState;
    m_testRestartAt  = 0;
@@ -329,6 +340,9 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    ArrayResize(m_lastBar, m_n);
    ArrayResize(m_reconOk, m_n);
    ArrayResize(m_posSeen, m_n);
+   ArrayResize(m_retryCount, m_n);
+   ArrayResize(m_retryAt, m_n);
+   ArrayResize(m_retryChanged, m_n);
    ArrayResize(m_stateBar, m_n);
    ArrayResize(m_seenBar, m_n);
    ArrayResize(m_seenAt, m_n);
@@ -368,6 +382,9 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
       m_lastBar[i] = 0;
       m_reconOk[i] = false;
       m_posSeen[i] = false;
+      m_retryCount[i] = 0;
+      m_retryAt[i] = 0;
+      m_retryChanged[i] = false;
       m_stateBar[i] = 0;
       m_seenBar[i] = 0;
       m_seenAt[i] = 0;
@@ -526,6 +543,9 @@ void CIndexSleeves::SimulateRestart(void)
       m_reconOk[i]  = false;
       m_stateBar[i] = 0;
       m_posSeen[i]  = false;
+      m_retryCount[i] = 0;
+      m_retryAt[i]    = 0;
+      m_retryChanged[i] = false;
       if(m_testLoseState)
         {
          m_lastBar[i]    = 0;
@@ -731,7 +751,10 @@ void CIndexSleeves::CloseSymbol(const string sym, const string why)
       if(m_trade.PositionClose(tk))
          PrintFormat("[AMS] 指数の層：決済 %s #%I64u（%s）", sym, tk, why);
       else
+        {
+         m_tradeFail = true;
          PrintFormat("[AMS] 指数の層：%s の決済に失敗（%d %s）", sym, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+        }
      }
   }
 
@@ -763,6 +786,7 @@ void CIndexSleeves::OpenLots(const string sym, double lots, const double dailyVo
          sl = NormalizeDouble(SymbolInfoDouble(sym, SYMBOL_BID) * (1.0 - m_slVolMul * dailyVol), dg);
       if(!m_trade.Buy(v, sym, 0.0, sl, 0.0, cmt))
         {
+         m_tradeFail = true;
          PrintFormat("[AMS] 指数の層：%s の注文に失敗（%d %s）", sym, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
          break;
         }
@@ -792,14 +816,25 @@ void CIndexSleeves::ReduceLots(const string sym, double lots)
         {
          if(m_trade.PositionClose(tk))
             lots -= pv;
+         else
+           {
+            m_tradeFail = true;
+            PrintFormat("[AMS] 指数の層：%s の決済に失敗（%d %s）", sym, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+           }
         }
       else
         {
          const double v = NormalizeLots(sym, lots);
-         if(v > 0.0 && m_trade.PositionClosePartial(tk, v))
+         if(v <= 0.0)
+            break;
+         if(m_trade.PositionClosePartial(tk, v))
             lots -= v;
          else
+           {
+            m_tradeFail = true;
+            PrintFormat("[AMS] 指数の層：%s の一部の決済に失敗（%d %s）", sym, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
             break;
+           }
         }
      }
   }
@@ -831,7 +866,10 @@ void CIndexSleeves::ApplyStops(const string sym, const double dailyVol)
       if(MathAbs(PositionGetDouble(POSITION_SL) - sl) < 0.5 * pt)
          continue;
       if(!m_trade.PositionModify(tk, sl, PositionGetDouble(POSITION_TP)))
+        {
+         m_tradeFail = true;
          PrintFormat("[AMS] 指数の層：%s #%I64u の逆指値を置き直せません（%d %s）", sym, tk, m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+        }
      }
   }
 
@@ -1038,6 +1076,8 @@ void CIndexSleeves::Summary(void)
       PrintFormat("[AMS] 指数の層：強制ロスカットを避ける上限で建玉を縮めた回数 %I64d", m_soCut);
    if(m_joint)
       PrintFormat("[AMS] 指数の層：まとめて丸めて、切り捨てより建玉が増えた回数 %I64d", m_jointUp);
+   if(m_retryBars > 0 || m_retryGiveUp > 0)
+      PrintFormat("[AMS] 指数の層：注文の失敗でやり直した回数（銘柄 × 日）%I64d、やり直してもできずにあきらめた回数 %I64d", m_retryBars, m_retryGiveUp);
    if(m_testRestartSec > 0)
       PrintFormat("[AMS] 指数の層：（検証用）EA の起動し直しを再現した回数 %I64d（%d 分ごと%s）", m_testRestarts, m_testRestartSec / 60,
                   m_testLoseState ? "。状態のファイルも失われたものとした" : "");
@@ -1545,8 +1585,9 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
    if(!Evaluate(i, t0))
       return(false);
    const string sym      = m_sym[i];
-   const bool   changed  = m_evChanged[i];
+   const bool   changed  = m_evChanged[i] || m_retryChanged[i];
    string       note     = m_evNote[i];
+   m_tradeFail = false;
    const string vixNote  = m_evVix[i];
    const double dailyVol = m_dvol[i];
    const double annVol   = m_evAnnVol[i];
@@ -1647,6 +1688,25 @@ bool CIndexSleeves::Process(const int i, const datetime t0)
       PrintFormat("[AMS] 指数の層：（観察モード）%s %s までの日足で判定：有効証拠金 %.0f、目標の割合 %.4f、切り捨てる前の目標 %.4f lot、1 lot の額 %.0f、1日の値動きの見積もり %.4f%%、前提の監視 %s、今の建玉 %.2f lot",
                   sym, TimeToString(m_evLast[i], TIME_DATE), equity, m_evFrac[i], want, npl, dailyVol * 100.0,
                   (m_regDays > 0 && m_regVal[i] != EMPTY_VALUE) ? StringFormat("%+.4f", m_regVal[i]) : "なし", cur);
+   //--- 注文・決済・逆指値の変更に失敗したときは、この日足を「処理済み」にせず、30秒後からやり直す（最大 120 回 = 約1時間）。
+   //    取引時間の境目・接続の切れ目・業者の側の一時的な拒否で、その日の売買が抜けるのを防ぐ。
+   if(m_tradeFail)
+     {
+      m_tradeFail = false;
+      if(m_retryCount[i] == 0)
+         m_retryBars++;
+      m_retryCount[i]++;
+      if(m_retryCount[i] <= 120)
+        {
+         m_retryChanged[i] = changed;
+         m_retryAt[i] = TimeCurrent() + 30;
+         return(false);
+        }
+      m_retryGiveUp++;
+      PrintFormat("[AMS] 指数の層：%s 売買のやり直しが上限（120回）に達したため、この日足ではあきらめます", sym);
+     }
+   m_retryCount[i]   = 0;
+   m_retryChanged[i] = false;
    return(true);
   }
 
@@ -1971,7 +2031,8 @@ void CIndexSleeves::ExecuteJoint(void)
       else if(xs[i] > 0.0 && tl[i] <= 0.0)
          note += StringFormat(" （目標 %.3f lot が最小の取引単位 %.2f lot に届かないため、持たない）", xs[i], SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN));
       m_tgtLots[i] = tl[i];
-      TradeTo(i, tl[i], anyChanged, equity, note);
+      m_tradeFail = false;
+      TradeTo(i, tl[i], anyChanged || m_retryChanged[i], equity, note);
       if(m_evChanged[i] || note != "" || m_dryRun)
          PrintFormat("[AMS] 指数の層：%s%s → 持つルール：%s、目標 %.2f lot（額 %.0f、値動きの見積もり 年 %.1f%%%s）", sym, note, StateText(i), tl[i], tgt[i],
                      m_evAnnVol[i] * 100.0, m_evVix[i] == "" ? "" : "、" + m_evVix[i]);
@@ -1979,6 +2040,22 @@ void CIndexSleeves::ExecuteJoint(void)
          PrintFormat("[AMS] 指数の層：（観察モード）%s %s までの日足で判定：有効証拠金 %.0f、目標の割合 %.4f、切り捨てる前の目標 %.4f lot、1 lot の額 %.0f、1日の値動きの見積もり %.4f%%、前提の監視 %s",
                      sym, TimeToString(m_evLast[i], TIME_DATE), equity, m_evFrac[i], xs[i], npl[i], m_dvol[i] * 100.0,
                      (m_regDays > 0 && m_regVal[i] != EMPTY_VALUE) ? StringFormat("%+.4f", m_regVal[i]) : "なし");
+      if(m_tradeFail && m_retryCount[i] < 120)
+        {
+         //--- 失敗：この銘柄は「処理済み」にせず、30秒後からやり直す
+         if(m_retryCount[i] == 0)
+            m_retryBars++;
+         m_retryCount[i]++;
+         m_retryChanged[i] = (anyChanged || m_retryChanged[i]);
+         m_jointRetryAt = TimeCurrent() + 30;
+         m_tradeFail = false;
+         continue;
+        }
+      if(m_tradeFail)
+         m_retryGiveUp++;
+      m_tradeFail = false;
+      m_retryCount[i]   = 0;
+      m_retryChanged[i] = false;
       m_lastBar[i] = m_evalBar[i];
      }
   }
@@ -2021,6 +2098,8 @@ void CIndexSleeves::OnTick(void)
         }
       if((long)now - (long)m_seenAt[i] < m_delaySec)
          continue;
+      if(now < m_retryAt[i])
+         continue;
       //--- 値段が動いていること（市場が開いていること）と、スプレッドを確かめる
       MqlTick tk;
       if(!SymbolInfoTick(m_sym[i], tk) || tk.bid <= 0.0 || tk.ask <= 0.0)
@@ -2052,7 +2131,7 @@ void CIndexSleeves::OnTick(void)
         }
      }
    //--- まとめて丸める形：すべての銘柄の判定がそろったら（そろわなくても、最初の判定から2分たったら）売買する
-   if(m_joint && pending > 0 && (waiting == 0 || (long)now - (long)m_firstEval >= 120))
+   if(m_joint && pending > 0 && now >= m_jointRetryAt && (waiting == 0 || (long)now - (long)m_firstEval >= 120))
      {
       ExecuteJoint();
       m_firstEval = 0;

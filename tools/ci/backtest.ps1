@@ -254,7 +254,7 @@ if (Test-Path "$out\tester_last.log") {
     if ($x.Length -gt 150) { $x.Substring(0, 150) } else { $x }
   })
   # 終わりのまとめの行（区切りの前に手じまった回数など）
-  $lines += @($tl | Where-Object { $_ -match '区切りの前に手じまった回数|強制ロスカットを避ける上限で建玉を縮めた回数|切り捨てより建玉が増えた回数|起動し直しを再現した回数' } | Select-Object -Last 4 | ForEach-Object { $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 ' })
+  $lines += @($tl | Where-Object { $_ -match '区切りの前に手じまった回数|強制ロスカットを避ける上限で建玉を縮めた回数|切り捨てより建玉が増えた回数|起動し直しを再現した回数|注文の失敗でやり直した回数' } | Select-Object -Last 5 | ForEach-Object { $_ -replace '^.*?\t(\d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2})\s+', '$1 ' })
   # 見送りの理由（最初の40件）
   $skip = @($tl | Where-Object { $_ -match '\[AMS\] 見送り' })
   $lines += "SKIPS total=$($skip.Count)"
