@@ -1,0 +1,2 @@
+run=667 mode=backtest period=H1 model=4 exec=default from=2023.11.01 to=2026.11.13 symbols=default deposit=500000 preset=none inputs=InpEntryMode=8;InpIxRevSymbols=US500,US100,US30;InpIxTrendSymbols=none;InpIxRevUnitVol=10;InpIxTrendUnitVol=0;InpIxMaxLev=10;InpIxMaxSpreadPct=0.05;InpMaxMarginUsePct=90;InpIxFlatMinutes=5 account=index leverage=10
+RESULT なし（テスト失敗）
