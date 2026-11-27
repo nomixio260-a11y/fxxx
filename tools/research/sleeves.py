@@ -193,6 +193,18 @@ def main():
         r = scale10(sum(S[k] for k in keys) / len(keys))
         keep[label] = r
         lines.append(row(label, r))
+    # 株価指数だけで持った場合（為替・金を使わない）と、比べる相手（S&P500 を CFD でずっと買い持ち、同じコスト）
+    d = Y.fetch("SPX")
+    d = d[d.index >= "1990-01-01"]
+    bh = pnl_w(pd.Series(1.0, index=d.index) * vol_weight(d["close"]), d, IR.short_rate("USD", d.index), 1.5, 0.0003)
+    bh = scale10(bh.reindex(idx_all).fillna(0.0))
+    lines += ["", "## 株価指数だけで持った場合（為替・金を使わない。値動きを年10%にそろえる）", "", HEAD, SEP]
+    for label, r in (("指数の戻りだけ（米国3指数）", S["指数の戻り（米国3指数）"]),
+                     ("指数の戻りだけ（厳しめ：ETF・翌日の始値）", S["指数の戻り（米国3指数・ETF・翌日の始値）"]),
+                     ("指数の順張りだけ（6指数）", S["指数の順張り（6指数）"]),
+                     ("指数の戻り＋順張り（半分ずつ）", scale10((S["指数の戻り（米国3指数）"] + S["指数の順張り（6指数）"]) / 2)),
+                     ("比べる相手：S&P500 をずっと買い持ち（CFD のコスト込み）", bh)):
+        lines.append(row(label, r))
     # 年ごとの成績
     four = keep["＋金の順張り（商品の CFD の口座もあればできること）"]
     yr = pd.DataFrame({k: S[k].groupby(S[k].index.year).sum() * 100 for k in main_keys})
