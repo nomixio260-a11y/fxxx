@@ -209,10 +209,11 @@ input string           InpIxRuleWeights     = "1,2,4";     // 戻り：ルール
 input bool             InpIxJointRound      = false;       // 建玉の丸め方：false=銘柄ごとに切り捨て（既定）／true=ルールが出ている銘柄をまとめて、目標とのずれが最小になるロットの組み合わせを選ぶ（100章。実際のティックの検証では、同じ下落の深さなら切り捨てより利益が小さかったので、既定では使わない）
 input double           InpIxJointEps        = 0.25;        // まとめて丸めるとき、全体の値動きが目標を超えてよい割合（0.25 = 目標の 1.25 倍まで）
 input bool             InpIxWarmStart       = true;        // 起動時に、日足の履歴からルールの状態を復元する（状態のファイルがなくても同じ状態に戻る。100章）
-input int              InpIxRegimeDays      = 750;         // 前提の監視：過去この日数の値動きが「続きやすい」と判定されたら IBS を止める（0で使わない。100章）
-input double           InpIxRegimeThr       = 0.02;        // 前提の監視のしきい値（MAC5 の平均がこの値を超えたら止める）
+input int              InpIxRegimeDays      = 1500;        // 前提の監視：過去この日数の値動きが「続きやすい」と判定されたら IBS を止める（0で使わない。日足がこの本数＋6本そろうまでは判定しない。100章）
+input double           InpIxRegimeThr       = 0.0;         // 前提の監視のしきい値（当日の値動きと、直前4日の値動きの重みつきの合計の、順位の相関がこの値を超えたら止める）
 input string           InpIxRegimeRef       = "US500";     // 前提の監視に使う銘柄（この銘柄の日足で、すべての銘柄をまとめて判定する。none なら銘柄ごとに判定）
 input bool             InpIxDryRun          = false;       // 観察モード：注文を一切出さず、判定と目標の建玉だけをログに出す（実際の口座との突き合わせ用）
+input double           InpIxEquityOffset    = 0.0;         // 建玉の計算に使わない額（円）。デモ口座の残高が検証の元金より大きいとき、その差を入れると、検証と同じ元金で動かせる（例：残高 300万円・元金 50万円なら 2500000）
 input double           InpIxSoGuard         = 0.9;         // 強制ロスカットを避ける上限：すべての建玉が逆指値にかかっても証拠金維持率がロスカットの水準を下回らない大きさに抑える（余裕の係数。0で使わない。99章）
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
 input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
@@ -1344,7 +1345,7 @@ int OnInit(void)
                          (InpIxVixFile == "none" || InpIxVixFile == "-") ? "" : InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult,
                          InpIxFlatMinutes, InpIxFlatEdgeBp, InpIxRuleWeights, InpIxSoGuard,
                          InpIxJointRound, InpIxJointEps, InpIxWarmStart, InpIxRegimeDays, InpIxRegimeThr,
-                         (InpIxRegimeRef == "none" || InpIxRegimeRef == "-") ? "" : InpIxRegimeRef, InpIxDryRun))
+                         (InpIxRegimeRef == "none" || InpIxRegimeRef == "-") ? "" : InpIxRegimeRef, InpIxDryRun, InpIxEquityOffset))
         {
          Print("[AMS] 指数の層：取引できる銘柄がありません");
          return(INIT_FAILED);
