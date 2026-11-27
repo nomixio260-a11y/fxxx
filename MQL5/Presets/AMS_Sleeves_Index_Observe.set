@@ -28,6 +28,6 @@ InpIxJointRound=false
 InpIxJointEps=0.25
 InpIxWarmStart=true
 InpIxRegimeDays=1500
-InpIxRegimeThr=0.0
+InpIxRegimeThr=1.0
 InpIxRegimeRef=US500
 InpIxDryRun=true

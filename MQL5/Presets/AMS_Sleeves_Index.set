@@ -16,13 +16,14 @@
 ; Robustness (chapter 100):
 ;   - InpIxWarmStart=true: rule states are rebuilt from daily bars at start and after missed days, so a restart or an outage
 ;     gives the same states as an uninterrupted run;
-;   - premise monitor (InpIxRegimeDays=1500, InpIxRegimeThr=0, InpIxRegimeRef=US500): the reversion rules rely on index returns
+;   - premise monitor (InpIxRegimeDays=1500, InpIxRegimeThr=1.0, InpIxRegimeRef=US500): the reversion rules rely on index returns
 ;     reversing from day to day (true since about 1999). The monitor is the rank correlation, over the last 1500 daily bars
-;     of US500, between a day's return and the weighted sum of the previous four returns. While it is above 0 (returns tend
-;     to continue), IBS - the rule without the 200-day filter - is switched off for all symbols. Since 1999 it has not
-;     triggered, so it costs nothing in the tests; in the 1962-98 data it halved the worst drawdown. It reacts slowly
-;     (one to two years), so it is insurance against a lasting change, not a timing tool. With fewer than 1506 daily bars
-;     (e.g. in a 3-year Strategy Tester run) it is not evaluated and IBS stays on.
+;     of US500, between a day's return and the weighted sum of the previous four returns. While it is more than one standard
+;     error (1/sqrt(1500) = 0.026) above zero (returns tend to continue), IBS - the rule without the 200-day filter - is
+;     switched off for all symbols. Since 1999 it has not triggered, so it costs nothing in the tests; in the 1962-98 data
+;     it roughly halved the worst drawdown. It reacts slowly (about two years), so it is insurance against a lasting change,
+;     not a timing tool. A false alarm would cut profit by about 40% (and risk by about 30%) while it lasts.
+;     With fewer than 1506 daily bars (e.g. in a 3-year Strategy Tester run) it is not evaluated and IBS stays on.
 ;   - InpIxJointRound=false: lots are floored per symbol. Joint rounding (true) holds positions more often on a small account,
 ;     but with real ticks it earned less for the same drawdown, so it is left as an option.
 ; Swap avoidance (InpIxFlatMinutes) is off: its saving was small and the real-tick results were mixed (chapter 99).
@@ -55,6 +56,6 @@ InpIxJointRound=false
 InpIxJointEps=0.25
 InpIxWarmStart=true
 InpIxRegimeDays=1500
-InpIxRegimeThr=0.0
+InpIxRegimeThr=1.0
 InpIxRegimeRef=US500
 InpIxDryRun=false

@@ -53,9 +53,10 @@
 //|   （状態のファイルがなくても、止まっていても、同じ状態に戻る）。             |
 //|  前提の監視：戻りの手法は「指数の日々の値動きは反転しやすい」ことが前提。    |
 //|   「当日の値動き」と「直前4日の値動きの重みつきの合計（4×前日+3×2日前       |
-//|   +2×3日前+4日前）」の、過去 W 日の順位の相関（スピアマン）がプラス          |
-//|   = 値動きが続きやすい相場のあいだは、IBS（200日の平均の条件がない           |
-//|   ルール）を止める。判定は1つの銘柄（US500）の日足で、全銘柄まとめて行う。    |
+//|   +2×3日前+4日前）」の、過去 W 日の順位の相関（スピアマン）が、              |
+//|   標準誤差（1 ÷ √W）の k 倍を超えている = 値動きが続きやすい相場のあいだは、   |
+//|   IBS（200日の平均の条件がないルール）を止める。                            |
+//|   判定は1つの銘柄（US500）の日足で、全銘柄まとめて行う。                      |
 //|  観察モード：注文を一切出さず、判定と目標の建玉だけをログに出す。            |
 //+------------------------------------------------------------------+
 #ifndef AMS_INDEXSLEEVES_MQH
@@ -111,7 +112,7 @@ private:
    bool              m_dryRun;         // 観察モード（注文を出さない）
    bool              m_warm;           // 起動時に、日足の履歴からルールの状態を復元する
    int               m_regDays;        // 前提の監視：過去何日の MAC5 の平均を見るか（0 で使わない）
-   double            m_regThr;         // この値を超えたら「続きやすい相場」とみなして IBS を止める
+   double            m_regThr;         // 順位の相関がこの値を超えたら「続きやすい相場」とみなして IBS を止める（入力は標準誤差の倍数。ここは相関の値）
    string            m_regRef;         // 監視に使う銘柄（空なら、銘柄ごとに自分の日足で判定する）
    double            m_eqOffset;       // 建玉の計算に使わない額（口座通貨）。有効証拠金からこの額を引いた残りを「元金」とみなす
    int               m_regOn[];        // 銘柄ごと：1 = IBS を使ってよい、0 = 止める
@@ -224,7 +225,8 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    m_jointEps     = MathMax(0.0, jointEps);
    m_warm         = warmStart;
    m_regDays      = (int)MathMax(0, regimeDays);
-   m_regThr       = regimeThr;
+   //--- しきい値は、標準誤差（1 ÷ √日数）の何倍かで指定する。相関の値に直して持っておく
+   m_regThr       = (m_regDays > 0) ? regimeThr / MathSqrt((double)m_regDays) : 0.0;
    m_regRef       = regimeRef;
    m_eqOffset     = MathMax(0.0, equityOffset);
    m_dryRun       = dryRun;
@@ -382,7 +384,7 @@ bool CIndexSleeves::Init(CTrade *trade, const ulong magic, const string &revSyms
    PrintFormat("[AMS] 指数の層：建玉の丸め方 %s、状態の復元 %s、前提の監視 %s%s",
                m_joint ? StringFormat("まとめて丸める（全体の値動きは目標の %.2f 倍まで）", 1.0 + m_jointEps) : "銘柄ごとに切り捨て",
                m_warm ? "あり" : "なし",
-               m_regDays > 0 ? StringFormat("あり（%s過去 %d 日の、当日と直前4日の値動きの順位の相関が %+.2f を超えたら IBS を止める）",
+               m_regDays > 0 ? StringFormat("あり（%s過去 %d 日の、当日と直前4日の値動きの順位の相関が %+.3f を超えたら IBS を止める）",
                                             m_regRef != "" ? m_regRef + " の日足で、すべての銘柄を判定。" : "", m_regDays, m_regThr) : "なし",
                m_dryRun ? "、**観察モード（注文は出しません）**" : "");
    if(m_eqOffset > 0.0)
