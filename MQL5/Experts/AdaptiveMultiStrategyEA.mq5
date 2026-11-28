@@ -342,6 +342,12 @@ void ExportLive(void)
      }
   }
 bool   g_stopOut    = false;   // バックテスト中に強制ロスカットがあったか
+//--- テスターのみ：日ごとの有効証拠金（含み損益を含む）。月ごと・12か月ごとの成績を、決済した時点ではなく資産の動きで測るため
+bool     g_eqRecord = false;    // 記録するか（テスターの通常の実行のときだけ）
+datetime g_eqCurDay = 0;        // いまの日（サーバー時間の日付）
+datetime g_eqDay[];             // 記録した日
+double   g_eqVal[];             // その日の終わりの有効証拠金（次の日の最初のティックの時点）
+int      g_eqN      = 0;
 bool   g_halted     = false;
 int    g_sigTotal   = 0;       // 注文を試みる対象になったシグナルの数
 int    g_sigSpread  = 0;       // スプレッドが広いまま期限切れになり、見送ったシグナルの数
@@ -1204,6 +1210,9 @@ int OnInit(void)
   {
    if(!ValidateInputs())
       return(INIT_PARAMETERS_INCORRECT);
+   g_eqRecord = (MQLInfoInteger(MQL_TESTER) && !MQLInfoInteger(MQL_OPTIMIZATION));
+   g_eqCurDay = 0;
+   g_eqN      = 0;
    if(InpListSymbols)
      {
       const int total = SymbolsTotal(false);
@@ -1455,6 +1464,47 @@ string GVName(const string key)
   }
 
 //+------------------------------------------------------------------+
+//| テスターのみ：日ごとの有効証拠金を記録する                              |
+//| 日付が変わった最初のティックで、前の日の分として記録する（EA が売買する前の値）|
+//+------------------------------------------------------------------+
+void RecordEquity(const bool flush)
+  {
+   const datetime now = TimeCurrent();
+   const datetime day = now - now % 86400;
+   if(!flush && day == g_eqCurDay)
+      return;
+   if(g_eqCurDay > 0)
+     {
+      if(g_eqN >= ArraySize(g_eqDay))
+        {
+         ArrayResize(g_eqDay, g_eqN + 512);
+         ArrayResize(g_eqVal, g_eqN + 512);
+        }
+      g_eqDay[g_eqN] = g_eqCurDay;
+      g_eqVal[g_eqN] = AccountInfoDouble(ACCOUNT_EQUITY);
+      g_eqN++;
+     }
+   g_eqCurDay = day;
+  }
+
+//+------------------------------------------------------------------+
+//| テスターのみ：記録した日ごとの有効証拠金を書き出す（AMS_equity.csv）       |
+//+------------------------------------------------------------------+
+void WriteEquity(void)
+  {
+   RecordEquity(true);
+   if(g_eqN <= 0)
+      return;
+   const int fh = FileOpen("AMS_equity.csv", FILE_WRITE | FILE_CSV | FILE_ANSI | FILE_COMMON, ',');
+   if(fh == INVALID_HANDLE)
+      return;
+   FileWrite(fh, "date", "equity");
+   for(int i = 0; i < g_eqN; i++)
+      FileWrite(fh, TimeToString(g_eqDay[i], TIME_DATE), DoubleToString(g_eqVal[i], 0));
+   FileClose(fh);
+  }
+
+//+------------------------------------------------------------------+
 //| 全銘柄の処理（ティックとタイマーの両方から呼ぶ）                        |
 //+------------------------------------------------------------------+
 void ProcessAll(void)
@@ -1566,6 +1616,8 @@ void ExportBarsAll(void)
 
 void OnTick(void)
   {
+   if(g_eqRecord)
+      RecordEquity(false);
    //--- 書き出しの調査では取引しない（テストの終わり＝OnTester で、全期間の足を書き出す）
    if(StringLen(InpExportBars) > 0)
      {
@@ -1916,6 +1968,8 @@ double OnTester(void)
       ExportBarsAll();
    if(output)
       ReportBreakdown();
+   if(output && g_eqRecord)
+      WriteEquity();
    if(output && InpExportDeals)
       WriteDeals("AMS_bt_deals.csv", 0);
    if(output)
