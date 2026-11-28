@@ -8,8 +8,10 @@ tester/credentials.env
 !reports/*.log
 !reports/live/logs/*.log
 !reports/live_index/logs/*.log
+!reports/live_commodity/logs/*.log
 *.tmp
 __pycache__/
 data/
 # 研究用の書き出し（業者の値段の履歴。リポジトリには入れない）
 reports/live_index/export/
+reports/live_commodity/export/

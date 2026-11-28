@@ -1,0 +1,142 @@
+name: MT5 Live Commodity (OANDA demo, commodity CFD)
+
+# OANDA の商品 CFD のデモ口座（為替・株価指数とは別のサブアカウント）で、EA の方式 8 を動かす。
+# 株価指数の口座用の mt5-live-index.yml と同じ作り。口座・状態の保存先・成績の置き場所（reports/live_commodity）だけが違う。
+# - **既定は「観察だけ」**（trading=false・chain=false）：端末の設定で自動売買を禁止し、EA も注文を出さない。
+#   取引を始めるときは、trading=true・chain=true と、取引用のプリセットを指定する（ユーザーの指示があるまで始めない）。
+# - 止めるには：リポジトリの変数に LIVE_CM_ENABLED=false を作る。実行中の回は Actions の画面から Cancel できる。
+# - 成績は reports/live_commodity/summary.md にまとめて、このブランチにコミットする。
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "この回で動かす最大の分数（既定 330）"
+        required: false
+        default: "330"
+      preset:
+        description: "使うプリセット（MQL5/Presets のファイル名。既定は、残高をそのまま使う控えめな形）"
+        required: false
+        default: "AMS_Sleeves_Commodity_Observe.set"
+      chain:
+        description: "終わる前に次の回を起動して続けるか（true / false。既定は false）"
+        required: false
+        default: "false"
+      trading:
+        description: "注文を許すか（false = 観察だけ。端末の設定で自動売買を禁止し、注文は一切出ない。既定は false）"
+        required: false
+        default: "false"
+
+concurrency:
+  group: mt5-live-commodity
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: windows-latest
+    timeout-minutes: 380
+    permissions:
+      contents: write   # 成績を reports/live にコミットするため
+      actions: write    # 次の回を起動するため
+    env:
+      MT5_LOGIN: ${{ secrets.MT5_CM_LOGIN }}
+      MT5_PASSWORD: ${{ secrets.MT5_CM_PASSWORD }}
+      MT5_SERVER: ${{ secrets.MT5_CM_SERVER }}
+      MT5_INSTALLER_URL: ${{ vars.MT5_INSTALLER_URL || 'https://download.mql5.com/cdn/web/oanda.corporation/mt5/oanda5setup.exe' }}
+      LIVE_MINUTES: ${{ inputs.minutes || '330' }}
+      LIVE_PRESET: ${{ inputs.preset || 'AMS_Sleeves_Commodity_Observe.set' }}
+      LIVE_SYMBOL: XAUUSD
+      LIVE_OUT_DIR: reports\live_commodity
+      LIVE_ENABLED: ${{ vars.LIVE_CM_ENABLED || 'true' }}
+      LIVE_ALLOW_TRADING: ${{ (inputs.trading || 'false') == 'false' && '0' || '1' }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Stop if disabled
+        if: env.LIVE_ENABLED == 'false'
+        run: echo "LIVE_CM_ENABLED=false のため、商品の口座の運用は止まっています。" && exit 1
+        shell: bash
+
+      - uses: actions/checkout@v4
+
+      - name: Install MetaTrader 5
+        shell: pwsh
+        run: ./tools/ci/install_mt5.ps1
+
+      - name: Compile EA (0 errors / 0 warnings)
+        shell: pwsh
+        run: ./tools/ci/compile.ps1
+
+      - name: Restore EA state
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/AppData/Roaming/MetaQuotes/Terminal/Common/Files
+          key: mt5-live-commodity-state-${{ github.run_id }}
+          restore-keys: mt5-live-commodity-state-
+
+      # 次の回を、この回の始めに予約しておく。concurrency（mt5-live-index）のため、次の回はこの回が終わるまで待ち、
+      # 終わると始まる。GitHub のサーバーが途中で落ちて、最後の手順まで進まなかった場合も、つなぎが切れない。
+      # （2026年11月15日に、サーバーが落ちて引き継ぎが途切れたための対策）
+      - name: Queue the next run
+        if: ${{ (inputs.chain || 'false') == 'true' && env.LIVE_ENABLED != 'false' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run mt5-live-commodity.yml --ref "$GITHUB_REF_NAME" \
+            -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を予約しました（この回が終わると始まります）"
+
+      - name: Run EA on the demo account
+        id: runea
+        shell: pwsh
+        run: ./tools/ci/live.ps1
+
+      - name: Upload research export (observation runs only)
+        if: ${{ always() && hashFiles('reports/live_commodity/export/*.csv') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: commodity-daily-export
+          path: reports/live_commodity/export
+          retention-days: 14
+
+      - name: Save EA state
+        if: ${{ always() && (inputs.trading || 'false') != 'false' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/AppData/Roaming/MetaQuotes/Terminal/Common/Files
+          key: mt5-live-commodity-state-${{ github.run_id }}
+
+      - name: Start the next run
+        if: ${{ !cancelled() && (inputs.chain || 'false') == 'true' && env.LIVE_ENABLED != 'false' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 始めに予約した次の回が待っていれば、何もしない（予約に失敗していたときだけ、ここで起動する）。
+          # 「この回より後に作られて、まだ終わっていない回」だけを数える（2026年11月22日、終わったばかりの前の回を
+          # 待っている回と数えてしまい、つなぎが切れたため）。
+          n=$(gh run list --workflow mt5-live-commodity.yml --branch "$GITHUB_REF_NAME" --limit 20 --json status,number \
+                --jq "[.[] | select(.number > ${GITHUB_RUN_NUMBER} and .status != \"completed\")] | length" || echo 0)
+          if [ "${n:-0}" -gt 0 ]; then echo "次の回は予約済みです"; exit 0; fi
+          # EA を動かす前に失敗した回（インストールの失敗など）は、すぐにやり直すと失敗を繰り返すので、5分待つ
+          if [ "${{ steps.runea.outcome }}" != "success" ]; then echo "EA を動かす前に失敗したため、5分待ってから次の回を起動します"; sleep 300; fi
+          gh workflow run mt5-live-commodity.yml --ref "$GITHUB_REF_NAME" \
+            -f minutes="${LIVE_MINUTES}" -f preset="${LIVE_PRESET}" -f chain=true && echo "次の回を起動しました"
+
+      - name: Save results to repository
+        if: always()
+        shell: bash
+        run: |
+          python tools/live_summary.py reports/live_commodity || true
+          tmp="$RUNNER_TEMP/live"; rm -rf "$tmp"; cp -r reports/live_commodity "$tmp" 2>/dev/null || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5 6 7 8; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard FETCH_HEAD
+            mkdir -p reports/live_commodity && cp -r "$tmp"/. reports/live_commodity/
+            git add reports/live_commodity
+            git diff --cached --quiet && { echo "変更なし"; exit 0; }
+            git commit -q -m "live-commodity: results ${GITHUB_RUN_NUMBER} [skip ci]"
+            if git push -q origin HEAD:"$GITHUB_REF_NAME"; then echo "saved"; exit 0; fi
+            sleep $((i * 5))
+          done

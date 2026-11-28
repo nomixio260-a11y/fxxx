@@ -617,7 +617,7 @@ void CIndexSleeves::ExportDaily(void)
          if(FileSize(fs) == 0)
             FileWrite(fs, "symbol", "bars", "first", "last", "digits", "point", "contract", "vol_min", "vol_step", "swap_mode", "swap_long", "swap_short",
                       "swap_sun", "swap_mon", "swap_tue", "swap_wed", "swap_thu", "swap_fri", "swap_sat", "notional_1lot", "margin_1lot", "spread_points", "bid",
-                      "currency_profit", "stops_level");
+                      "currency_profit", "stops_level", "trade_mode", "calc_mode", "swap_3days", "path");
          FileSeek(fs, 0, SEEK_END);
          double mg = 0.0;
          if(!OrderCalcMargin(ORDER_TYPE_BUY, sym, 1.0, SymbolInfoDouble(sym, SYMBOL_ASK), mg))
@@ -634,7 +634,9 @@ void CIndexSleeves::ExportDaily(void)
                    DoubleToString(NotionalPerLot(sym), 0), DoubleToString(mg, 0),
                    DoubleToString((SymbolInfoDouble(sym, SYMBOL_ASK) - SymbolInfoDouble(sym, SYMBOL_BID)) / MathMax(SymbolInfoDouble(sym, SYMBOL_POINT), 1e-9), 1),
                    DoubleToString(SymbolInfoDouble(sym, SYMBOL_BID), dg), SymbolInfoString(sym, SYMBOL_CURRENCY_PROFIT),
-                   IntegerToString(SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL)));
+                   IntegerToString(SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL)), IntegerToString(SymbolInfoInteger(sym, SYMBOL_TRADE_MODE)),
+                   IntegerToString(SymbolInfoInteger(sym, SYMBOL_TRADE_CALC_MODE)), IntegerToString(SymbolInfoInteger(sym, SYMBOL_SWAP_ROLLOVER3DAYS)),
+                   SymbolInfoString(sym, SYMBOL_PATH));
          FileClose(fs);
         }
       PrintFormat("[AMS] 指数の層：（書き出し）%s 日足 %d 本（%s〜%s）、スワップ 買い %.4f / 売り %.4f、最小 %.2f lot・刻み %.2f、1 lot の額 %.0f、スプレッド %.1f ポイント",
