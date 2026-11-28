@@ -1,0 +1,44 @@
+; AdaptiveMultiStrategyEA - gold trend sleeve as a SMALL, HIGHLY LEVERAGED allocation ("pocket", chapter 106). EXTREME RISK inside this account.
+; Idea: keep only 20-30% of the total money in this (commodity) account and the rest in the index account; restore that share once a year.
+;   The two accounts have separate margin, so this sleeve cannot lose more than the money placed in this account;
+;   in a strong gold trend the account multiplies (the position grows while it wins and shrinks while it loses).
+; Rule (unchanged): hold gold while its daily close is above the 200-day average, reviewed every 7 days. Long only. Daily stop at 4 x daily volatility.
+; Size: the position's own volatility is 100% of this account's equity per year (leverage about 5-8x; gold margin is 5%).
+; This account alone - MT5 tester on OANDA's own data, JPY 3,000,000, account leverage 1:100, measured on daily equity:
+;   last 3 years, real ticks: 2024 +220%, 2025 +1,122%, 2026 -47%; drawdown 80%; worst day -25.5%.
+;   2007-2026: +11% per year, DRAWDOWN 99%, worst day -31%; 12 losing years out of 20 (down to -71%); 2025 +1,187%, 2010 +247%, 2024 +220%.
+;   Run alone and never refilled, it loses almost everything in periods like 2012-2018. It is meant only as a small share that is refilled.
+; Both accounts together (index account with AMS_Sleeves_Index_Growth.set 70% + this account 30%, share restored every year):
+;   last 3 years, real ticks: +1,560% (+152% per year), drawdown 37%, calendar 2025 +361%, every 12-month window positive (worst +14%).
+;   2007-2026: +42% per year, drawdown 54%, worst year -27%, one year above +300% (2025: +382%), 5 losing years.
+;   Without 2025 the other 19 years grow +33% per year, below the index account alone (+38%): the pocket costs a few percent per year
+;   in ordinary years and pays in a rare strong-trend year.
+; To use only a part of a larger balance as the pocket, set InpIxEquityOffset to the amount NOT to be used
+;   (example: balance 3,000,000 and pocket 750,000 -> InpIxEquityOffset=2250000; verified to give the same percentage results).
+; Attach to an XAUUSD chart (H1).
+InpEntryMode=8
+InpIxRevSymbols=none
+InpIxTrendSymbols=XAUUSD
+InpIxRuleR2=false
+InpIxRuleD7=false
+InpIxRuleIBS=false
+InpIxRevUnitVol=0.0
+InpIxTrendUnitVol=100.0
+InpIxTrendCheckDays=7
+InpIxMaxLev=10.0
+InpIxBand=0.25
+InpIxSLVolMul=4.0
+InpIxVolModel=0
+InpIxVixFile=none
+InpIxRuleWeights=1,2,3
+InpIxSoGuard=0.9
+InpIxFlatMinutes=0
+InpIxDelayMin=5
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=90.0
+InpIxJointRound=false
+InpIxWarmStart=true
+InpIxRegimeDays=0
+InpIxRegimeRef=none
+InpIxDryRun=false
+InpIxEquityOffset=0
