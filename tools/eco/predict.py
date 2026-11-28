@@ -49,9 +49,12 @@ def load_models(folder):
     lr = np.load(os.path.join(folder, "lr.npz"))
     cnn = np.load(os.path.join(folder, "cnn.npz"))
     seeds = sorted({k.split("_")[0] for k in cnn.files})
+    # LightGBM のモデルはテキストのファイル。Windows で取り出すと改行コードが CR+LF に変わることがあり、そのままでは読み込みに失敗するので、
+    # 文字列として読んで（改行は LF にそろう）から渡す
+    booster = lambda name: lgb.Booster(model_str=open(os.path.join(folder, name), encoding="utf-8", newline=None).read().replace("\r", ""))   # noqa: E731
     return dict(meta=json.load(open(os.path.join(folder, "meta.json"), encoding="utf-8")),
-                lr={k: lr[k] for k in lr.files}, gbm=lgb.Booster(model_file=os.path.join(folder, "gbm.txt")),
-                reg=lgb.Booster(model_file=os.path.join(folder, "reg.txt")),
+                lr={k: lr[k] for k in lr.files}, gbm=booster("gbm.txt"),
+                reg=booster("reg.txt"),
                 cnn=[{k[len(s) + 1:]: cnn[k] for k in cnn.files if k.startswith(s + "_")} for s in seeds])
 
 

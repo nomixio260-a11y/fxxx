@@ -518,6 +518,7 @@ bool CProbSleeve::Process(const int i, const datetime t0)
    if(!found && !MQLInfoInteger(MQL_TESTER) && (long)TimeTradeServer() - (long)m_seenAt[i] < m_delaySec + m_waitSec)
      {
       m_retryAt[i] = TimeTradeServer() + 30;                                    // 実運用：予想がファイルに届くのを待つ
+      Warn(i, StringFormat("日足 %s の予想がファイルに届くのを待っています（最大 %d 分）", TimeToString(rt[got - 1].time, TIME_DATE), m_waitSec / 60));
       return(false);
      }
    m_cntDays++;

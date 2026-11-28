@@ -53,8 +53,10 @@ function Update-Prob {
   if ((Test-Path $probPath) -and (Get-Item $probPath).LastWriteTimeUtc -ge $newest) { return }
   try {
     & python (Join-Path $repo 'tools\eco\predict.py') --bars $common --vix (Join-Path $common 'AMS_vix.csv') --out $probPath --log (Join-Path $common 'AMS_prob_log.csv') 2>&1 |
-      ForEach-Object { Write-Host "[predict] $_" }
+      Select-Object -Last 40 | ForEach-Object { Write-Host "[predict] $_" }
+    if ($LASTEXITCODE -ne 0) { Write-Host "注意：予想の作成に失敗しました（終了コード $LASTEXITCODE）。確率の層は、予想が届くまで何も持ちません" }
   } catch { Write-Host "注意：予想の作成に失敗しました（$($_.Exception.Message)）" }
+  $global:LASTEXITCODE = 0   # 予想の作成の失敗で、回そのものを失敗にしない
 }
 
 # 終わる時刻を決める（UTC、tools/ci/schedule.ps1）。
