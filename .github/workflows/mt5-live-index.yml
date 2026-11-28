@@ -10,7 +10,7 @@ name: MT5 Live Index (OANDA demo, index CFD)
 #   LIVE_IX_ENABLED=false を作る。実行中の回は Actions の画面から Cancel できる。
 # - 状態（自動調整の記録・月初の残高など）は、キャッシュで次の回に引き継ぐ。
 # - 成績は reports/live_index/summary.md にまとめて、このブランチにコミットする。
-# - 既定のプリセット（AMS_Sleeves_Index_Demo.set）は、残高 300万円をそのまま使い、ルール1つ分を 5% に下げた形（103章。約7年の実データで、最大DD 29%）。
+# - 既定のプリセット（AMS_Sleeves_Index_Demo.set）は、残高をそのまま使う、控えめな大きさの形（104章：戻り 4%＋NASDAQ100 の順張り 8%。約7年の実データで 年率 +21%、最大DD 30%）。
 # - 入力 trading=false なら、観察だけ（端末の設定で自動売買を禁止する。注文は一切出ない）。プリセットは AMS_Sleeves_Index_Observe.set を使う。
 
 on:
@@ -21,7 +21,7 @@ on:
         required: false
         default: "330"
       preset:
-        description: "使うプリセット（MQL5/Presets のファイル名。既定は、残高をそのまま使い、ルール1つ分 5% の形）"
+        description: "使うプリセット（MQL5/Presets のファイル名。既定は、残高をそのまま使う控えめな形）"
         required: false
         default: "AMS_Sleeves_Index_Demo.set"
       chain:

@@ -1,20 +1,22 @@
-; AdaptiveMultiStrategyEA - index mean-reversion sleeve for the OANDA index CFD DEMO account (chapters 100 and 103).
-; Same rules as AMS_Sleeves_Index.set. The whole balance is used (InpIxEquityOffset=0) with a smaller size: InpIxRevUnitVol=5.
-; Why this size: on the broker's own minute data, February 2020 - November 2026 (includes the 2020 crash and the 2022 decline),
-;   3,000,000 JPY at 5 earned about +15% to +16% per year with a maximum drawdown of 29% (worst month -18%, worst 12 months -19%;
-;   2020 +3%, 2021 +33%, 2022 -12%, 2023 +14%, 2024 +25%, 2025 +16%, 2026 +41%).
-;   The reference size 8.75 had a 48% drawdown in the same test. Using the whole balance with a smaller size was more
-;   efficient than imitating a 500,000 JPY account (which cannot hold the small positions because of minimum lot sizes).
-; To imitate a 500,000 JPY account instead: InpIxEquityOffset = balance - 500000 (see chapter 100).
-; Larger sizes: 6.5 -> +21% per year / 36% drawdown, 8.75 -> +26% / 48%, 12.5 (AMS_Sleeves_Index_Growth.set) -> +30% / 56%.
+; AdaptiveMultiStrategyEA - index account, default setting for the DEMO account (chapters 100, 103 and 104).
+; Two sleeves on the whole balance (InpIxEquityOffset=0):
+;   1 reversion (R2 / D7 / IBS, unchanged rules) on US500, US100, US30 and JP225, InpIxRevUnitVol=4
+;   2 trend: hold US100 while its close is above the 200-day average (reviewed every 7 days), InpIxTrendUnitVol=8
+; Why: on the broker's own data, February 2020 - November 2026 (3,000,000 JPY), this earned about +21% per year with a
+;   maximum drawdown of 30% (2020 +15%, 2021 +27%, 2022 -5%, 2023 +14%, 2024 +38%, 2025 +22%, 2026 +42%; worst 12 months -15%).
+;   The previous default (reversion only at 5) earned +16% per year with a 29% drawdown (2022 -12%, worst 12 months -19%).
+;   Last 3 years, real ticks: +129% (drawdown 21%) against +102% (18%).
+; The trend sleeve fills the days on which the reversion rules hold nothing. Over 40 years of index data it earned a modest
+;   return of its own; it lost a little in 2000-2008. JP225 is the weakest part of the evidence (chapter 101).
+; Larger: AMS_Sleeves_Index_Growth.set. Reversion only (the reference of the earlier tests): AMS_Sleeves_Index.set.
 InpEntryMode=8
-InpIxRevSymbols=US500,US100,US30
-InpIxTrendSymbols=none
+InpIxRevSymbols=US500,US100,US30,JP225
+InpIxTrendSymbols=US100
 InpIxRuleR2=true
 InpIxRuleD7=true
 InpIxRuleIBS=true
-InpIxRevUnitVol=5.0
-InpIxTrendUnitVol=0.0
+InpIxRevUnitVol=4.0
+InpIxTrendUnitVol=8.0
 InpIxTrendCheckDays=7
 InpIxMaxLev=10.0
 InpIxBand=0.25

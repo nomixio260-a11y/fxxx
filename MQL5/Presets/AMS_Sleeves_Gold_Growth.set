@@ -1,0 +1,35 @@
+; AdaptiveMultiStrategyEA - gold trend sleeve, LARGE setting (chapter 104). HIGH RISK. Needs a commodity CFD account.
+; Rule (unchanged): hold gold while its close is above the 200-day average, reviewed every 7 days.
+; Size: three times AMS_Sleeves_Gold.set (InpIxTrendUnitVol=33.6), with a stop re-based every day at 4 x daily volatility.
+; Tested with the EA on public minute data (not yet on the broker's own data):
+;   last 3 years (Nov 2023 - Oct 2026, gold rose from 1,982 to 3,875 USD): +296%, drawdown 41%, best 12 months +318%,
+;     by year: 2024 +75%, 2025 +138%, 2026 about 0%.
+;   2010 - 2026: about +8% per year with a 77% drawdown. It lost every year from 2012 to 2018
+;     (-3%, -13%, -29%, -13%, -12%, -22%, -6%). The size pays only while gold keeps trending.
+; Attach to an XAUUSD chart (H1).
+InpEntryMode=8
+InpIxRevSymbols=none
+InpIxTrendSymbols=XAUUSD
+InpIxRuleR2=false
+InpIxRuleD7=false
+InpIxRuleIBS=false
+InpIxRevUnitVol=0.0
+InpIxTrendUnitVol=33.6
+InpIxTrendCheckDays=7
+InpIxMaxLev=10.0
+InpIxBand=0.25
+InpIxSLVolMul=4.0
+InpIxVolModel=0
+InpIxVixFile=none
+InpIxRuleWeights=1,2,3
+InpIxSoGuard=0.9
+InpIxFlatMinutes=0
+InpIxDelayMin=5
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=80.0
+InpIxJointRound=false
+InpIxWarmStart=false
+InpIxRegimeDays=0
+InpIxRegimeRef=none
+InpIxDryRun=false
+InpIxEquityOffset=0

@@ -1,18 +1,18 @@
-; AdaptiveMultiStrategyEA - index mean-reversion sleeve, MAXIMUM-GROWTH setting (chapters 101 and 103). HIGH RISK.
-; Same rules as AMS_Sleeves_Index.set. Differences: InpIxRevUnitVol=12.5 and the whole balance is used (InpIxEquityOffset=0).
-; This is about the size where growth peaks; larger values earned LESS and lost more.
-;   3,000,000 JPY, broker's own minute data, February 2020 - November 2026 (run 758): about +30% per year,
-;   maximum drawdown 56%, worst month -33% (March 2020), worst 12 months -44%, 2022 as a whole -22%.
-;   The last 3 years alone (run 749): +309% with a 39% drawdown - a good period, not the norm.
-; "+300% in one year" did not happen in any 12-month window at any setting (chapter 101).
+; AdaptiveMultiStrategyEA - index account, LARGE setting (chapters 101, 103 and 104). HIGH RISK.
+; Same two sleeves as AMS_Sleeves_Index_Demo.set at more than twice the size, whole balance (InpIxEquityOffset=0):
+;   reversion on US500, US100, US30 and JP225 with InpIxRevUnitVol=8.75, trend on US100 with InpIxTrendUnitVol=20.
+; Broker's own data, February 2020 - November 2026, 3,000,000 JPY (run 821): about +43% per year, maximum drawdown 56%,
+;   worst month -35% (March 2020), worst 12 months -35%. Last 3 years, real ticks (run 824): +363%, drawdown 42%,
+;   best 12 months +203%, worst 12 months -6%.
+; For the same drawdown this earned more than reversion alone at 12.5 (+30% per year, drawdown 56%).
 InpEntryMode=8
-InpIxRevSymbols=US500,US100,US30
-InpIxTrendSymbols=none
+InpIxRevSymbols=US500,US100,US30,JP225
+InpIxTrendSymbols=US100
 InpIxRuleR2=true
 InpIxRuleD7=true
 InpIxRuleIBS=true
-InpIxRevUnitVol=12.5
-InpIxTrendUnitVol=0.0
+InpIxRevUnitVol=8.75
+InpIxTrendUnitVol=20.0
 InpIxTrendCheckDays=7
 InpIxMaxLev=10.0
 InpIxBand=0.25
