@@ -1,0 +1,35 @@
+run=853 mode=backtest period=H1 model=1 exec=default from=2023.11.01 to=2026.10.30 symbols=default deposit=3000000 preset=none inputs=InpEntryMode=8;InpIxRevSymbols=none;InpIxTrendSymbols=XAU_HD;InpIxRuleR2=false;InpIxRuleD7=false;InpIxRuleIBS=false;InpIxRevUnitVol=0;InpIxMaxLev=10;InpIxMaxSpreadPct=0;InpMaxMarginUsePct=90;InpIxSLVolMul=4;InpIxVolModel=0;InpIxVixFile=none;InpIxRuleWeights=1,2,3;InpIxWarmStart=false;InpIxRegimeDays=0;InpIxTrendUnitVol=33.6 custom=XAU_HD symbol=XAU_HD account=fx leverage=20
+RESULT net=8877890 | pf=2.49 | trades=15 | win=7(46.67%) | dd=41%(8094205) | months=36 avg=+5.25% geo=+3.90% min=-11.09% max=+80.56% ge10=4 | signals:total=0,skip_spread=0,skip_other=0,skip_adapt=0,skip_monthlock=0,skip_monthstop=0 | symbol:XAU_HD(15)=+8877890 | regime:SLEEVE(15)=+8877890 | strategy:IX(15)=+8877890 | cost:+0.0pips=+8877890(PF2.49),+0.5pips=+8877681(PF2.49),+1.0pips=+8877471(PF2.49),+2.0pips=+8877052(PF2.49)
+MONTHLY 2023-11:0.00,2023-12:0.00,2024-01:0.00,2024-02:0.00,2024-03:0.00,2024-04:0.00,2024-05:0.00,2024-06:0.00,2024-07:0.00,2024-08:0.00,2024-09:0.00,2024-10:0.00,2024-11:79.31,2024-12:-2.13,2025-01:0.00,2025-02:0.00,2025-03:0.00,2025-04:31.86,2025-05:0.00,2025-06:0.00,2025-07:0.00,2025-08:0.00,2025-09:0.00,2025-10:80.56,2025-11:0.00,2025-12:0.00,2026-01:28.53,2026-02:-8.48,2026-03:0.00,2026-04:-0.59,2026-05:0.00,2026-06:-11.09,2026-07:0.00,2026-08:0.00,2026-09:-8.85,2026-10:0.00
+SAMPLE sl_hit=9 tp_hit=0 closed_by_ea=0 stop_out=0
+CS	0	02:57:16.134	Tester	  === エントリーの方式 ====
+2023.11.01 00:00:00 [AMS] 指数の層：XAU_HD（順張り）最小 0.00 lot・刻み 0.01、1 lot の額 198350・必要証拠金 19840（口座のレバレッジ 1:20）、スワップ（方式=5）買い -4.4000 / 売り -0.5000
+2023.11.01 00:00:00 [AMS] 指数の層：XAU_HD スワップの倍率（日〜土）0/1/1/1/1/3/0（3日分の曜日の設定 5）、今日の取引の終わり 00:00、今夜のスワップ 値段の 0.0122%
+2023.11.01 00:00:00 [AMS] 指数の層：値動きの見積もり 直近60日、逆指値 その日の値動きの見積もり × 4.0（毎日置き直す）、VIX の倍率 使わない
+2023.11.01 00:00:00 [AMS] 指数の層：ルールがそろった数の重み 1つ 1.00・2つ 2.00・3つ 3.00、強制ロスカットを避ける上限 あり（余裕の係数 0.90）（ロスカットの水準 100%）
+2023.11.01 00:00:00 [AMS] 指数の層：建玉の丸め方 銘柄ごとに切り捨て、状態の復元 なし、前提の監視 なし
+2023.11.01 00:00:00 [AMS] エントリーの方式: ENTRY_SLEEVES
+2023.11.01 00:05:00 [AMS] 指数の層：XAU_HD BUY 43.70 lot @1984.10
+2024.10.29 00:05:01 [AMS] 指数の層：XAU_HD BUY 14.88 lot @2741.66
+2024.11.06 15:38:40 stop loss triggered #2 buy 43.7 XAU_HD 1984.10 sl: 2660.86 [#4 sell 43.7 XAU_HD at 2660.86]
+2024.11.06 15:38:40 stop loss triggered #3 buy 14.88 XAU_HD 2741.66 sl: 2660.86 [#5 sell 14.88 XAU_HD at 2660.86]
+2024.11.07 01:05:05 [AMS] 指数の層：XAU_HD BUY 50.18 lot @2662.53
+2025.02.20 01:05:08 [AMS] 指数の層：XAU_HD BUY 19.69 lot @2933.62
+2025.04.04 18:37:40 stop loss triggered #6 buy 37.31 XAU_HD 2662.53 sl: 3019.58 [#9 sell 37.31 XAU_HD at 3019.58]
+2025.04.04 18:37:40 stop loss triggered #8 buy 19.69 XAU_HD 2933.62 sl: 3019.58 [#10 sell 19.69 XAU_HD at 3019.58]
+2025.04.07 01:05:05 [AMS] 指数の層：XAU_HD BUY 54.89 lot @3028.73
+2025.08.18 01:05:01 [AMS] 指数の層：XAU_HD BUY 13.93 lot @3334.91
+2025.10.21 16:02:40 stop loss triggered #11 buy 41.02 XAU_HD 3028.73 sl: 4193.50 [#14 sell 41.02 XAU_HD at 4193.50]
+2025.10.21 16:02:40 stop loss triggered #13 buy 13.93 XAU_HD 3334.91 sl: 4193.50 [#15 sell 13.93 XAU_HD at 4193.50]
+2025.10.22 02:05:08 [AMS] 指数の層：XAU_HD BUY 52.00 lot @4119.40
+2026.01.29 17:27:40 stop loss triggered #16 buy 52 XAU_HD 4119.40 sl: 5146.40 [#17 sell 52 XAU_HD at 5146.40]
+2026.01.30 01:05:12 [AMS] 指数の層：XAU_HD BUY 51.89 lot @5419.55
+2026.01.30 04:21:40 stop loss triggered #18 buy 51.89 XAU_HD 5419.55 sl: 5131.86 [#19 sell 51.89 XAU_HD at 5131.86]
+2026.02.02 01:11:26 [AMS] 指数の層：XAU_HD BUY 39.46 lot @4771.95
+2026.02.02 08:37:40 stop loss triggered #20 buy 39.46 XAU_HD 4771.95 sl: 4425.86 [#21 sell 39.46 XAU_HD at 4425.86]
+2026.02.03 01:05:05 [AMS] 指数の層：XAU_HD BUY 34.43 lot @4700.55
+2026.04.30 01:05:04 [AMS] 指数の層：XAU_HD BUY 9.26 lot @4540.13
+2026.08.26 01:05:03 [AMS] 指数の層：XAU_HD BUY 34.49 lot @4661.61
+2026.10.29 22:59:59 [AMS] 指数の層：強制ロスカットを避ける上限で建玉を縮めた回数 0
+SKIPS total=0
+SKIP_REASONS
