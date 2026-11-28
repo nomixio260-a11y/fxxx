@@ -20,6 +20,7 @@
 #include <AMS\CarryTrend.mqh>
 #include <AMS\IndexSleeves.mqh>
 #include <AMS\CarrySleeve.mqh>
+#include <AMS\ProbSleeve.mqh>
 
 //==================================================================
 // 入力パラメータ
@@ -232,6 +233,17 @@ input double           InpCrSLVolMul        = 4.0;         // キャリー：逆
 input double           InpCrMaxLev          = 2.0;         // キャリー：1銘柄の建玉の額 ÷ 有効証拠金 の上限
 input double           InpCrMaxSpreadPct    = 0.25;        // キャリー：スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（天然ガスはふだん 0.2% ほど。0 で待たない）
 
+input group "=== 確率の層（複合システム。外で計算した「上がる確率」に比例して持つ。109章） ==="
+input string           InpPbSymbols         = "none";      // 確率の層で売買する銘柄（カンマ区切り。none なら使わない。例：US500,US100,US30）
+input string           InpPbFile            = "AMS_prob.csv"; // 確率：予想のファイル（共通フォルダ。行は「日付,銘柄,確率,z」。tools/eco/ が作る）
+input double           InpPbUnitVol         = 5.0;         // 確率：z = 1 のときの建玉の値動き（口座に対する年率 %。z は ±2 まで）
+input bool             InpPbLongOnly        = true;        // 確率：買いだけ（確率がふだんより低いときは持たない）
+input int              InpPbVolDays         = 20;          // 確率：値動きの大きさを測る日数（研究の計算と同じ 20）
+input double           InpPbSLVolMul        = 4.0;         // 確率：逆指値（1日の値動きの何倍か。毎日置き直す。0 で置かない）
+input double           InpPbMaxLev          = 2.0;         // 確率：1銘柄の建玉の額 ÷ 有効証拠金 の上限
+input int              InpPbWaitMin         = 30;          // 確率：実運用で、その日足の予想がファイルに届くのを待つ分数（届かなければ、その日は持たない）
+input bool             InpPbShadow          = true;        // 確率：影のモード（実際の口座では注文を出さず、確率と判定を記録するだけ。テスターでは売買する）。昇格の基準を満たすまで true
+
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
 input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）がこれを超えたら評価値 0
@@ -247,6 +259,8 @@ bool        g_sleevesMode = false;
 bool        g_ixOn        = false;   // 方式 8 のうち、指数・金の層が動いているか
 CCarrySleeve g_crSleeve;      // キャリーの層（方式 8 と一緒に動く）
 bool        g_crOn        = false;
+CProbSleeve g_pbSleeve;       // 確率の層（方式 8 と一緒に動く）
+bool        g_pbOn        = false;
 double g_weights[4][AMS_STRATEGY_COUNT];   // [REGIME][STRATEGY]
 double g_peakEquity = 0.0;
 double g_monthStartBal = 0.0;   // 月初の残高（月間目標の判定用）
@@ -1406,9 +1420,39 @@ int OnInit(void)
       g_crOn = (ArraySize(crSyms) > 0) &&
                g_crSleeve.Init(InpMagic + 7, crSyms, InpCrUnitVol, InpCrMinSwapPct, InpCrTrendDays, InpCrCheckDays, InpCrSLVolMul,
                                InpCrMaxLev, InpIxBand, InpIxDelayMin, InpCrMaxSpreadPct, crObserve, InpIxEquityOffset);
-      if(!g_ixOn && !g_crOn)
+      //--- 確率の層（複合システム。109章）。別のマジックナンバーで、建玉を分けて数える
+      string pbSyms[], pbKeys[];
+      if(InpPbSymbols != "none" && InpPbSymbols != "-" && InpPbSymbols != "")
         {
-         Print("[AMS] 指数の層・キャリーの層：取引できる銘柄がありません");
+         string rawPb[];
+         const int cntPb = StringSplit(InpPbSymbols, ',', rawPb);
+         for(int i = 0; i < cntPb; i++)
+           {
+            StringTrimLeft(rawPb[i]);
+            StringTrimRight(rawPb[i]);
+            if(rawPb[i] == "")
+               continue;
+            const string sym = ResolveSymbol(rawPb[i]);
+            if(sym == "")
+              {
+               PrintFormat("[AMS] 銘柄 %s は口座に無いため除外します", rawPb[i]);
+               continue;
+              }
+            const int n = ArraySize(pbSyms);
+            ArrayResize(pbSyms, n + 1);
+            ArrayResize(pbKeys, n + 1);
+            pbSyms[n] = sym;
+            pbKeys[n] = rawPb[i];
+           }
+        }
+      // 影のモード：昇格の基準（tools/eco/evaluate.py）を満たすまでは、実際の口座では注文を出さない（テスターでは、検証のために売買する）
+      const bool pbObserve = (InpIxDryRun || (InpPbShadow && !MQLInfoInteger(MQL_TESTER)));
+      g_pbOn = (ArraySize(pbSyms) > 0) &&
+               g_pbSleeve.Init(InpMagic + 8, pbSyms, pbKeys, InpPbFile, InpPbUnitVol, InpPbLongOnly, InpPbVolDays, InpPbSLVolMul, InpPbMaxLev,
+                               InpIxBand, InpIxDelayMin, InpPbWaitMin, InpIxMaxSpreadPct, pbObserve, InpIxEquityOffset);
+      if(!g_ixOn && !g_crOn && !g_pbOn)
+        {
+         Print("[AMS] 指数の層・キャリーの層・確率の層：取引できる銘柄がありません");
          return(INIT_FAILED);
         }
       g_sleevesMode = true;
@@ -1490,6 +1534,8 @@ void OnDeinit(const int reason)
          g_sleeves.Summary();
       if(g_crOn)
          g_crSleeve.Summary();
+      if(g_pbOn)
+         g_pbSleeve.Summary();
      }
    if(!MQLInfoInteger(MQL_TESTER))
      {
@@ -1701,6 +1747,8 @@ void OnTick(void)
          g_sleeves.OnTick();
       if(g_crOn)
          g_crSleeve.OnTick();
+      if(g_pbOn)
+         g_pbSleeve.OnTick();
       return;
      }
    ProcessAll();
@@ -1717,6 +1765,8 @@ void OnTimer(void)
          g_sleeves.OnTick();
       if(g_crOn)
          g_crSleeve.OnTick();
+      if(g_pbOn)
+         g_pbSleeve.OnTick();
       static datetime lastIxExport = 0;
       if(TimeCurrent() - lastIxExport >= 3600)
         {

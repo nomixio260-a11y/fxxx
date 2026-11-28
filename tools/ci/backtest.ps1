@@ -123,6 +123,17 @@ ShutdownTerminal=1
 }
 # 方式 8（株価指数の層）は、VIX の日次の終値を共通フォルダのファイルから読む（98章）。検証の前に置いておく
 if ($kv['InpEntryMode'] -eq '8') { & (Join-Path $repo 'tools\ci\fetch_vix.ps1') }
+# 確率の層（109章）は、予想のファイルを共通フォルダから読む。リポジトリに置いた検証用のファイル（学習に使っていない年の予想だけで作ったもの）を置いておく
+if ($kv['InpPbSymbols'] -and $kv['InpPbSymbols'] -ne 'none' -and $kv['InpPbSymbols'] -ne '-') {
+  $commonFiles = Join-Path $env:APPDATA 'MetaQuotes\Terminal\Common\Files'
+  New-Item -ItemType Directory -Force -Path $commonFiles | Out-Null
+  $probName = if ($kv['InpPbFile']) { $kv['InpPbFile'] } else { 'AMS_prob.csv' }
+  $probSrc  = Join-Path $repo "MQL5\Files\$probName"
+  if (Test-Path $probSrc) {
+    Copy-Item $probSrc (Join-Path $commonFiles $probName) -Force
+    Write-Host "確率の層：予想のファイル $probName を置きました（$((Get-Content $probSrc | Measure-Object -Line).Lines) 行）"
+  } else { Write-Host "注意：予想のファイル MQL5\Files\$probName がリポジトリにありません（確率の層は何も持ちません）" }
+}
 Write-Host "入力の上書き:`n$($inputLines -join "`n")"
 
 $ini = @"
