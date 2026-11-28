@@ -1,0 +1,42 @@
+run=867 mode=backtest period=H1 model=4 exec=default from=2023.11.01 to=2026.11.13 symbols=default deposit=3000000 preset=none inputs=InpEntryMode=8;InpIxRevSymbols=none;InpIxTrendSymbols=XAUUSD;InpIxRuleR2=false;InpIxRuleD7=false;InpIxRuleIBS=false;InpIxRevUnitVol=0;InpIxMaxLev=10;InpIxMaxSpreadPct=0.05;InpMaxMarginUsePct=90;InpIxVolModel=0;InpIxVixFile=none;InpIxRuleWeights=1,2,3;InpIxWarmStart=true;InpIxRegimeDays=0;InpIxTrendUnitVol=33.6;InpIxSLVolMul=4 account=commodity leverage=20
+RESULT net=9011309 | pf=2.47 | trades=18 | win=10(55.56%) | dd=41%(8203922) | months=37 avg=+4.99% geo=+3.82% min=-11.13% max=+89.74% ge10=5 | signals:total=0,skip_spread=0,skip_other=0,skip_adapt=0,skip_monthlock=0,skip_monthstop=0 | symbol:XAUUSD(18)=+9011309 | regime:SLEEVE(18)=+9011309 | strategy:IX(18)=+9011309 | cost:+0.0pips=+9011309(PF2.47),+0.5pips=+9011080(PF2.47),+1.0pips=+9010850(PF2.47),+2.0pips=+9010392(PF2.47)
+MONTHLY 2023-11:0.00,2023-12:0.00,2024-01:0.00,2024-02:0.00,2024-03:0.00,2024-04:0.00,2024-05:0.00,2024-06:12.29,2024-07:0.00,2024-08:0.00,2024-09:0.00,2024-10:0.00,2024-11:58.36,2024-12:-1.97,2025-01:0.00,2025-02:0.00,2025-03:0.00,2025-04:22.59,2025-05:4.73,2025-06:0.00,2025-07:0.00,2025-08:0.00,2025-09:0.00,2025-10:89.74,2025-11:0.00,2025-12:0.00,2026-01:28.84,2026-02:-8.18,2026-03:-1.54,2026-04:0.00,2026-05:0.00,2026-06:-11.13,2026-07:0.00,2026-08:0.00,2026-09:-8.92,2026-10:0.00,2026-11:0.00
+SAMPLE sl_hit=11 tp_hit=0 closed_by_ea=0 stop_out=0
+CS	0	05:19:09.069	Tester	  === エントリーの方式 ====
+2023.11.01 00:00:00 [AMS] 指数の層：XAUUSD（順張り）最小 0.01 lot・刻み 0.01、1 lot の額 30059753・必要証拠金 7520504（口座のレバレッジ 1:20）、スワップ（方式=5）買い -3.6200 / 売り 1.2700
+2023.11.01 00:00:00 [AMS] 指数の層：XAUUSD スワップの倍率（日〜土）0/1/1/3/1/1/0（3日分の曜日の設定 3）、今日の取引の終わり 23:59、今夜のスワップ 値段の 0.0101%
+2023.11.01 00:00:00 [AMS] 指数の層：値動きの見積もり 直近60日、逆指値 その日の値動きの見積もり × 4.0（毎日置き直す）、VIX の倍率 使わない
+2023.11.01 00:00:00 [AMS] 指数の層：ルールがそろった数の重み 1つ 1.00・2つ 2.00・3つ 3.00、強制ロスカットを避ける上限 あり（余裕の係数 0.90）（ロスカットの水準 100%）
+2023.11.01 00:00:00 [AMS] 指数の層：建玉の丸め方 銘柄ごとに切り捨て、状態の復元 あり、前提の監視 なし
+2023.11.01 00:00:00 [AMS] 指数の層：XAUUSD 状態の復元（最後の日足 2023.10.30）：TREND （記録では なし）
+2023.11.01 00:00:00 [AMS] エントリーの方式: ENTRY_SLEEVES
+2023.11.01 01:08:18 [AMS] 指数の層：XAUUSD BUY 0.29 lot @1984.302
+2024.09.02 01:10:01 [AMS] 指数の層：XAUUSD BUY 0.08 lot @2504.570
+2024.11.06 01:09:06 [AMS] 指数の層：XAUUSD BUY 0.10 lot @2743.226
+2024.11.06 15:38:38 stop loss triggered #2 buy 0.21 XAUUSD 1984.302 sl: 2660.474 [#6 sell 0.21 XAUUSD at 2660.474]
+2024.11.06 15:38:38 stop loss triggered #4 buy 0.08 XAUUSD 2504.570 sl: 2660.474 [#7 sell 0.08 XAUUSD at 2660.474]
+2024.11.06 15:38:38 stop loss triggered #5 buy 0.1 XAUUSD 2743.226 sl: 2660.474 [#8 sell 0.1 XAUUSD at 2660.474]
+2024.11.07 01:09:04 [AMS] 指数の層：XAUUSD BUY 0.32 lot @2663.050
+2025.02.14 01:09:33 [AMS] 指数の層：XAUUSD BUY 0.08 lot @2928.235
+2025.04.04 18:37:40 stop loss triggered #9 buy 0.24 XAUUSD 2663.050 sl: 3019.175 [#12 sell 0.24 XAUUSD at 3019.175]
+2025.04.04 18:37:40 stop loss triggered #11 buy 0.08 XAUUSD 2928.235 sl: 3019.175 [#13 sell 0.08 XAUUSD at 3019.175]
+2025.04.07 01:11:03 [AMS] 指数の層：XAUUSD BUY 0.36 lot @3021.785
+2025.08.11 01:11:01 [AMS] 指数の層：XAUUSD BUY 0.09 lot @3396.205
+2025.10.01 01:09:03 [AMS] 指数の層：XAUUSD BUY 0.12 lot @3861.636
+2025.10.21 16:02:30 stop loss triggered #14 buy 0.26 XAUUSD 3021.785 sl: 4194.660 [#18 sell 0.26 XAUUSD at 4194.660]
+2025.10.21 16:02:30 stop loss triggered #16 buy 0.09 XAUUSD 3396.205 sl: 4194.660 [#19 sell 0.09 XAUUSD at 4194.660]
+2025.10.21 16:02:30 stop loss triggered #17 buy 0.12 XAUUSD 3861.636 sl: 4194.660 [#20 sell 0.12 XAUUSD at 4194.660]
+2025.10.22 01:09:02 [AMS] 指数の層：XAUUSD BUY 0.34 lot @4121.285
+2026.01.29 17:27:39 stop loss triggered #21 buy 0.34 XAUUSD 4121.285 sl: 5158.751 [#22 sell 0.34 XAUUSD at 5158.751]
+2026.01.30 01:09:02 [AMS] 指数の層：XAUUSD BUY 0.34 lot @5445.979
+2026.01.30 04:19:15 stop loss triggered #23 buy 0.34 XAUUSD 5445.979 sl: 5157.866 [#24 sell 0.34 XAUUSD at 5157.866]
+2026.02.02 01:09:03 [AMS] 指数の層：XAUUSD BUY 0.25 lot @4821.143
+2026.02.02 08:23:31 stop loss triggered #25 buy 0.25 XAUUSD 4821.143 sl: 4474.331 [#26 sell 0.25 XAUUSD at 4474.331]
+2026.02.03 01:09:03 [AMS] 指数の層：XAUUSD BUY 0.22 lot @4719.552
+2026.04.30 01:09:08 [AMS] 指数の層：XAUUSD BUY 0.06 lot @4545.727
+2026.08.26 01:09:01 [AMS] 指数の層：XAUUSD BUY 0.22 lot @4660.589
+2026.11.12 23:59:59 [AMS] 指数の層：注文の失敗でやり直した回数（銘柄 × 日）10、やり直してもできずにあきらめた回数 0
+2026.11.12 23:59:59 [AMS] 指数の層：強制ロスカットを避ける上限で建玉を縮めた回数 8
+2026.11.12 23:59:59 [AMS] 指数の層：注文の失敗でやり直した回数（銘柄 × 日）10、やり直してもできずにあきらめた回数 0
+SKIPS total=0
+SKIP_REASONS
