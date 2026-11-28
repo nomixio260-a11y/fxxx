@@ -220,7 +220,7 @@ try {
   Show-NewLines "$dir\logs\*.log" 'terminal' | Out-Null
   if ($mode -ne 'optimize') {
     Get-ChildItem "$dir\Tester\Agent-*\logs\*.log" -ErrorAction SilentlyContinue | ForEach-Object {
-      Get-Content $_.FullName -Encoding Unicode -Tail 300 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "[tester] $_" }
+      Get-Content $_.FullName -Encoding Unicode -Tail 300 -ErrorAction SilentlyContinue | Where-Object { -not $env:MT5_LOGIN -or $_ -notmatch [regex]::Escape($env:MT5_LOGIN) } | ForEach-Object { Write-Host "[tester] $_" }
     }
   }
 } finally {
@@ -236,9 +236,15 @@ foreach ($f in 'AMS_breakdown.csv', 'AMS_monthly.csv', 'AMS_rulemonth.csv', 'AMS
 # 調査用の足の書き出し（InpExportBars）
 Get-ChildItem (Join-Path $env:APPDATA "MetaQuotes\Terminal\Common\Files") -Filter 'AMS_bars_*.csv' -ErrorAction SilentlyContinue | Copy-Item -Destination $out -Force
 $termLog = Get-ChildItem "$dir\logs\*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
-if ($termLog) { Get-Content $termLog.FullName -Encoding Unicode | Out-File "$out\terminal_last.log" -Encoding utf8 }
+# ログは成果物として公開されるので、口座番号を含む行は書き出さない（ログインの行・接続の行に口座番号が入る）
+function Remove-LoginLines($lines) {
+  if (-not $env:MT5_LOGIN) { return $lines }
+  $pat = [regex]::Escape($env:MT5_LOGIN)
+  return @($lines | Where-Object { $_ -notmatch $pat })
+}
+if ($termLog) { Remove-LoginLines (Get-Content $termLog.FullName -Encoding Unicode) | Out-File "$out\terminal_last.log" -Encoding utf8 }
 $agentLog = Get-ChildItem "$dir\Tester" -Recurse -Filter *.log -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -like '*logs*' } | Sort-Object LastWriteTime | Select-Object -Last 1
-if ($agentLog) { Get-Content $agentLog.FullName -Encoding Unicode | Out-File "$out\tester_last.log" -Encoding utf8 }
+if ($agentLog) { Remove-LoginLines (Get-Content $agentLog.FullName -Encoding Unicode) | Out-File "$out\tester_last.log" -Encoding utf8 }
 
 # 動作確認用：取引の件数と、最初のほうの取引の抜粋（結果の1行要約と一緒に保存する）
 if (Test-Path "$out\tester_last.log") {
