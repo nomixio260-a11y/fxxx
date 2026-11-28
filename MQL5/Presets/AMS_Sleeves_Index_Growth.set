@@ -1,9 +1,9 @@
-; AdaptiveMultiStrategyEA - index mean-reversion sleeve, MAXIMUM-GROWTH setting (chapter 101). HIGH RISK.
+; AdaptiveMultiStrategyEA - index mean-reversion sleeve, MAXIMUM-GROWTH setting (chapters 101 and 103). HIGH RISK.
 ; Same rules as AMS_Sleeves_Index.set. Differences: InpIxRevUnitVol=12.5 and the whole balance is used (InpIxEquityOffset=0).
-; This is the setting where growth peaked in the tests; larger values earned LESS and lost more.
-;   3,000,000 JPY, last 3 years, real ticks (run 749): +309% (about +59% per year), max drawdown 39%, worst month -22%,
-;   best 12 months +141%, worst 12 months +14%.
-;   Longer calculations (15 and 26 years): +28% to +31% per year with drawdowns of 46% to 62%.
+; This is about the size where growth peaks; larger values earned LESS and lost more.
+;   3,000,000 JPY, broker's own minute data, February 2020 - November 2026 (run 758): about +30% per year,
+;   maximum drawdown 56%, worst month -33% (March 2020), worst 12 months -44%, 2022 as a whole -22%.
+;   The last 3 years alone (run 749): +309% with a 39% drawdown - a good period, not the norm.
 ; "+300% in one year" did not happen in any 12-month window at any setting (chapter 101).
 InpEntryMode=8
 InpIxRevSymbols=US500,US100,US30

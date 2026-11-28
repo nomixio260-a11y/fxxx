@@ -11,8 +11,13 @@
 ;   - a stop is re-based every day at 4 x the forecast daily volatility below the price (InpIxSLVolMul=4);
 ;   - stop-out guard (InpIxSoGuard=0.9, chapter 99): total positions are capped so that even if every stop is hit,
 ;     the margin level stays above the broker's stop-out level.
-; InpIxRevUnitVol decides how much is risked. Verified on the index account (last 3 years, 500,000 JPY, real ticks: chapter 99):
-;   7.5 = cautious, 8.75 = middle (this file), 10-12.5 = aggressive (drawdowns of 22-29%); 15 and above gave less profit with deeper drawdowns.
+; InpIxRevUnitVol decides how much is risked. Tested on the index account with the broker's own minute data,
+;   February 2020 - November 2026, which includes the 2020 crash and the 2022 decline (chapter 103).
+;   Return per year / maximum drawdown:
+;     500,000 JPY:    5 -> +10% / 27%,   6.5 -> +17% / 36%,   8.75 (this file) -> +19% / 48%,   12.5 -> +23% / 55%
+;     3,000,000 JPY:  3 -> +10% / 19%,   5 -> +16% / 29%,   6.5 -> +21% / 36%,   8.75 -> +26% / 48%,   12.5 -> +30% / 56%
+;   The last 3 years alone looked far better (8.75: drawdown 16-30%). Do not choose the size from that window.
+;   This file keeps 8.75 because it is the reference setting of the tests in reports/experiments.md.
 ; Robustness (chapter 100):
 ;   - InpIxWarmStart=true: rule states are rebuilt from daily bars at start and after missed days, so a restart or an outage
 ;     gives the same states as an uninterrupted run;

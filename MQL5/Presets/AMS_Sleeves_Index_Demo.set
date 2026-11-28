@@ -1,19 +1,19 @@
-; AdaptiveMultiStrategyEA - index mean-reversion sleeve for the OANDA index CFD DEMO account (chapter 100).
-; Same settings as AMS_Sleeves_Index.set, plus InpIxEquityOffset=2500000.
-; Why: the demo account holds 3,000,000 JPY, but every test in reports/experiments.md used 500,000 JPY.
-;   With 3,000,000 JPY the same settings also hold the small positions that a 500,000 JPY account cannot (minimum lot sizes),
-;   so the risk is about twice that of the tests (3 years, real ticks: +244% with a 30% drawdown instead of +166% with 16%).
-;   With the offset, positions and limits are computed from (equity - 2,500,000), i.e. from 500,000 JPY plus profits and losses,
-;   and the Strategy Tester reproduces the 500,000 JPY results (run 730: +825,390 JPY vs +828,569 JPY).
-; If the demo balance is different, set InpIxEquityOffset = balance - 500000. To use the whole balance instead,
-;   use AMS_Sleeves_Index.set with a smaller InpIxRevUnitVol (see chapter 100, section 6).
+; AdaptiveMultiStrategyEA - index mean-reversion sleeve for the OANDA index CFD DEMO account (chapters 100 and 103).
+; Same rules as AMS_Sleeves_Index.set. The whole balance is used (InpIxEquityOffset=0) with a smaller size: InpIxRevUnitVol=5.
+; Why this size: on the broker's own minute data, February 2020 - November 2026 (includes the 2020 crash and the 2022 decline),
+;   3,000,000 JPY at 5 earned about +16% per year with a maximum drawdown of 29% (worst month -18%, worst 12 months -19%;
+;   2020 +3%, 2021 +33%, 2022 -12%, 2023 +14%, 2024 +25%, 2025 +16%, 2026 +41%).
+;   The reference size 8.75 had a 48% drawdown in the same test. Using the whole balance with a smaller size was more
+;   efficient than imitating a 500,000 JPY account (which cannot hold the small positions because of minimum lot sizes).
+; To imitate a 500,000 JPY account instead: InpIxEquityOffset = balance - 500000 (see chapter 100).
+; Larger sizes: 6.5 -> +21% per year / 36% drawdown, 8.75 -> +26% / 48%, 12.5 (AMS_Sleeves_Index_Growth.set) -> +30% / 56%.
 InpEntryMode=8
 InpIxRevSymbols=US500,US100,US30
 InpIxTrendSymbols=none
 InpIxRuleR2=true
 InpIxRuleD7=true
 InpIxRuleIBS=true
-InpIxRevUnitVol=8.75
+InpIxRevUnitVol=5.0
 InpIxTrendUnitVol=0.0
 InpIxTrendCheckDays=7
 InpIxMaxLev=10.0
@@ -37,4 +37,4 @@ InpIxRegimeDays=1500
 InpIxRegimeThr=1.0
 InpIxRegimeRef=US500
 InpIxDryRun=false
-InpIxEquityOffset=2500000
+InpIxEquityOffset=0
