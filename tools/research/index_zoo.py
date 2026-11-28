@@ -29,8 +29,20 @@ HOLDS = (1, 4, 12)
 PER = (("設計", "2011-01-01", "2019-01-01"), ("選ぶ", "2019-01-01", "2023-01-01"), ("答え合わせ", "2023-01-01", "2026-11-01"))
 
 
+def load(sym):
+    """1分足。株価指数のファイル名の形にないもの（原油など）は、data の中の、その銘柄の1分足のファイルを読む。"""
+    m = IC.load_any(sym)
+    if m is None:
+        import glob
+        import data as D
+        parts = [IC.read_csv_m1(f) for f in sorted(glob.glob(os.path.join(D.DATA, f"{sym}_M1_*.csv")))]
+        m = pd.concat(parts).sort_index()
+        m = m[~m.index.duplicated()]
+    return m
+
+
 def bars(sym, minutes):
-    m = IC.load_any(sym)[["o", "h", "l", "c"]]
+    m = load(sym)[["o", "h", "l", "c"]]
     if minutes == 1440:
         g = m.resample("24h", offset="22h", label="left", closed="left")
     else:
@@ -38,10 +50,11 @@ def bars(sym, minutes):
     return pd.DataFrame({"o": g["o"].first(), "h": g["h"].max(), "l": g["l"].min(), "c": g["c"].last()}).dropna()
 
 
-def main():
+def main(syms=None, out="index_zoo", title="株価指数", note="5つの指数をまとめて評価。"):
+    syms = syms or SYMS
     acc = defaultdict(lambda: [None, None, None])       # (tf, sig, H, side) → [日ごとの合計(コスト後), 件数, 条件なしとの差の合計]
     zero = pd.Series(dtype=float)
-    for name, (sym, spread) in SYMS.items():
+    for name, (sym, spread) in syms.items():
         for tfname, mins in TFS:
             b = bars(sym, mins)
             sig = PZ.signals(b, zero)
@@ -95,9 +108,9 @@ def main():
         rows.append(rec)
     df = pd.DataFrame(rows)
     out_dir = os.path.join(F.ROOT, "reports", "research")
-    df.round(4).to_csv(os.path.join(out_dir, "index_zoo_all.csv"), index=False)
-    lines = ["# 研究：株価指数の日中〜数日の値動きのパターン（`tools/research/index_zoo.py`）", "",
-             f"調べた組み合わせ：{len(df)} 通り（時間足 4 × パターン {df['pattern'].nunique()} × 保有 3 × 買い・売り）。5つの指数をまとめて評価。",
+    df.round(4).to_csv(os.path.join(out_dir, f"{out}_all.csv"), index=False)
+    lines = [f"# 研究：{title}の日中〜数日の値動きのパターン（`tools/research/{'index_zoo' if out == 'index_zoo' else 'commodity_zoo'}.py`）", "",
+             f"調べた組み合わせ：{len(df)} 通り（時間足 4 × パターン {df['pattern'].nunique()} × 保有 3 × 買い・売り）。{note}",
              "t = コスト後の損益（1日の値動きの大きさで割った値）の日ごとの合計から計算。「差の t」= 同じ本数を条件なしで買った場合との差（コスト前）。", ""]
     for side in ("買い", "売り"):
         d = df[df["side"] == side]
@@ -112,8 +125,9 @@ def main():
                 lines.append(f"| {r.tf} | {r.pattern} | {r.hold}本 | {r['設計_t']:+.1f}（{r['設計_tx']:+.1f}、{r['設計_n']}） | {r['選ぶ_t']:+.1f}（{r['選ぶ_tx']:+.1f}） | "
                              f"{r['答え合わせ_t']:+.1f}（{r['答え合わせ_tx']:+.1f}） | {r['答え合わせ_mean']:+.3f} |")
             lines.append("")
-    open(os.path.join(out_dir, "index_zoo.md"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
+    open(os.path.join(out_dir, f"{out}.md"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
     print("\n".join(lines))
+    return df
 
 
 if __name__ == "__main__":
