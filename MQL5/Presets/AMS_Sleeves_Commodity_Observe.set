@@ -41,3 +41,4 @@ InpCrTrendDays=200
 InpCrCheckDays=7
 InpCrSLVolMul=4.0
 InpCrMaxLev=2.0
+InpCrMaxSpreadPct=0.25

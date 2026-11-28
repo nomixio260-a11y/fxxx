@@ -230,6 +230,7 @@ input int              InpCrTrendDays       = 200;         // キャリー：流
 input int              InpCrCheckDays       = 7;           // キャリー：見直す間隔（日）
 input double           InpCrSLVolMul        = 4.0;         // キャリー：逆指値（1日の値動きの何倍か。毎日置き直す。0 で置かない）
 input double           InpCrMaxLev          = 2.0;         // キャリー：1銘柄の建玉の額 ÷ 有効証拠金 の上限
+input double           InpCrMaxSpreadPct    = 0.25;        // キャリー：スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（天然ガスはふだん 0.2% ほど。0 で待たない）
 
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
@@ -1398,7 +1399,7 @@ int OnInit(void)
         }
       g_crOn = (ArraySize(crSyms) > 0) &&
                g_crSleeve.Init(InpMagic + 7, crSyms, InpCrUnitVol, InpCrMinSwapPct, InpCrTrendDays, InpCrCheckDays, InpCrSLVolMul,
-                               InpCrMaxLev, InpIxBand, InpIxDelayMin, InpIxMaxSpreadPct, InpIxDryRun, InpIxEquityOffset);
+                               InpCrMaxLev, InpIxBand, InpIxDelayMin, InpCrMaxSpreadPct, InpIxDryRun, InpIxEquityOffset);
       if(!g_ixOn && !g_crOn)
         {
          Print("[AMS] 指数の層・キャリーの層：取引できる銘柄がありません");

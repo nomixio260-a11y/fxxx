@@ -53,13 +53,14 @@ private:
    datetime          m_warnAt[];
    bool              m_tradeFail;
    string            m_stateFile;
-   int               m_cntOpen, m_cntClose, m_cntRetry;
+   int               m_cntOpen, m_cntClose, m_cntRetry, m_cntStopFail;
 
    double            SizingEquity(void) { return(MathMax(0.0, AccountInfoDouble(ACCOUNT_EQUITY) - m_eqOffset)); }
    double            NotionalPerLot(const string sym);
    double            NormalizeLots(const string sym, const double lots);
    double            SignedLots(const string sym);
    double            SwapAnnualPct(const string sym, const bool isLong);
+   double            ToTick(const string sym, const double price);
    void              CloseAll(const string sym, const string why);
    void              Open(const string sym, const int dir, double lots, const double dailyVol);
    void              Reduce(const string sym, const int dir, double lots);
@@ -70,7 +71,7 @@ private:
    void              LoadState(void);
 
 public:
-                     CCarrySleeve(void) : m_n(0), m_tradeFail(false), m_cntOpen(0), m_cntClose(0), m_cntRetry(0) {}
+                     CCarrySleeve(void) : m_n(0), m_tradeFail(false), m_cntOpen(0), m_cntClose(0), m_cntRetry(0), m_cntStopFail(0) {}
    bool              Init(const ulong magic, const string &syms[], const double unitVol, const double minSwapPct, const int trendDays,
                           const int checkDays, const double slVolMul, const double maxLev, const double band, const int delayMin,
                           const double maxSpreadPct, const bool dryRun, const double equityOffset);
@@ -223,6 +224,19 @@ double CCarrySleeve::SwapAnnualPct(const string sym, const bool isLong)
   }
 
 //+------------------------------------------------------------------+
+//| 値段を、その銘柄の呼び値の刻みに合わせる（刻みが小数点以下の桁数より粗い銘柄がある。|
+//| 例：原油は表示が小数3桁でも、刻みは 0.01。合っていないと、逆指値が拒否される）       |
+//+------------------------------------------------------------------+
+double CCarrySleeve::ToTick(const string sym, const double price)
+  {
+   const double ts = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+   const int    dg = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   if(ts <= 0.0)
+      return(NormalizeDouble(price, dg));
+   return(NormalizeDouble(MathRound(price / ts) * ts, dg));
+  }
+
+//+------------------------------------------------------------------+
 void CCarrySleeve::Warn(const int i, const string msg)
   {
    const datetime now = TimeCurrent();
@@ -282,8 +296,8 @@ void CCarrySleeve::Open(const string sym, const int dir, double lots, const doub
          break;
       double sl = 0.0;
       if(m_slVolMul > 0.0 && dailyVol > 0.0)
-         sl = NormalizeDouble(dir > 0 ? SymbolInfoDouble(sym, SYMBOL_BID) * (1.0 - m_slVolMul * dailyVol)
-                                      : SymbolInfoDouble(sym, SYMBOL_ASK) * (1.0 + m_slVolMul * dailyVol), dg);
+         sl = ToTick(sym, dir > 0 ? SymbolInfoDouble(sym, SYMBOL_BID) * (1.0 - m_slVolMul * dailyVol)
+                                  : SymbolInfoDouble(sym, SYMBOL_ASK) * (1.0 + m_slVolMul * dailyVol));
       const bool ok = (dir > 0) ? m_tr.Buy(v, sym, 0.0, sl, 0.0, cmt) : m_tr.Sell(v, sym, 0.0, sl, 0.0, cmt);
       if(!ok)
         {
@@ -375,13 +389,14 @@ void CCarrySleeve::ApplyStops(const string sym, const double dailyVol)
          if(sl - ask < minDist)
             sl = ask + minDist;
         }
-      sl = NormalizeDouble(sl, dg);
-      if(MathAbs(PositionGetDouble(POSITION_SL) - sl) < 0.5 * pt)
+      sl = ToTick(sym, sl);
+      if(MathAbs(PositionGetDouble(POSITION_SL) - sl) < 0.5 * MathMax(pt, SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE)))
          continue;
       if(!m_tr.PositionModify(tk, sl, PositionGetDouble(POSITION_TP)))
         {
-         m_tradeFail = true;
-         PrintFormat("[AMS] キャリーの層：%s #%I64u の逆指値を置き直せません（%d %s）", sym, tk, m_tr.ResultRetcode(), m_tr.ResultRetcodeDescription());
+         m_cntStopFail++;
+         PrintFormat("[AMS] キャリーの層：%s #%I64u の逆指値を置き直せません（%d %s、指定 %s）。前の逆指値のまま持ち、次の日足でまた置き直します", sym, tk,
+                     m_tr.ResultRetcode(), m_tr.ResultRetcodeDescription(), DoubleToString(sl, dg));
         }
      }
   }
@@ -587,6 +602,6 @@ void CCarrySleeve::Summary(void)
   {
    if(m_n <= 0)
       return;
-   PrintFormat("[AMS] キャリーの層：新しく建てた回数 %d、決済した回数 %d、注文の失敗でやり直した回数 %d", m_cntOpen, m_cntClose, m_cntRetry);
+   PrintFormat("[AMS] キャリーの層：新しく建てた回数 %d、決済した回数 %d、注文の失敗でやり直した回数 %d、逆指値を置き直せなかった回数 %d", m_cntOpen, m_cntClose, m_cntRetry, m_cntStopFail);
   }
 //+------------------------------------------------------------------+
