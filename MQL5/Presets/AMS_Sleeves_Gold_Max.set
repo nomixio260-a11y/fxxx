@@ -7,7 +7,7 @@
 ;     By year: 2024 +94%, 2025 +330% (the one calendar year above +300%), 2026 -21%.
 ;   2007 - 2026: +1,209% (+14% per year), Sharpe 0.51, DRAWDOWN 89%, worst 12 months -60%.
 ;     Losing years: 2012-2018 seven in a row (-23, -10, -41, -15, -19, -29, -7%), 2021 -40%, 2022 -19%.
-;     12-month results of +300% or more: 1% of all 12-month windows in 20 years (all of them in 2025).
+;     12-month results of +300% or more: 1.3% of all 12-month windows in 20 years (windows starting Aug-Sep 2010 and Nov 2024 - Mar 2025).
 ;   If the true Sharpe is half of the measured one, this size is about 1.7 x Kelly: growth drops to half and a halving of the account is likely (89%).
 InpEntryMode=8
 InpIxRevSymbols=none

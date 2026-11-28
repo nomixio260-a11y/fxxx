@@ -5,7 +5,7 @@
 ; Numbers below: MT5 tester on OANDA's own data with the account's real leverage, JPY 3,000,000, measured on daily equity (chapter 105).
 ;   last 3 years, real ticks: +179% (+40% per year), drawdown 27%, best 12 months +147%, worst -6%. By year: 2024 +37%, 2025 +103%, 2026 -5%.
 ;   2007 - 2026: +413% (+9% per year), Sharpe 0.51, drawdown 59%, worst 12 months -33%. Seven losing years in a row in 2012-2018.
-;   Pair with AMS_Sleeves_Index_Demo.set on the index account (half of the money each): last 3 years +155%, drawdown 14%, worst 12 months +15%.
+;   Pair with AMS_Sleeves_Index_Demo.set on the index account (half of the money each): last 3 years +154%, drawdown 14%, worst 12 months +15%.
 InpEntryMode=8
 InpIxRevSymbols=none
 InpIxTrendSymbols=XAUUSD
