@@ -222,7 +222,7 @@ input double           InpIxSoGuard         = 0.9;         // 強制ロスカッ
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
 input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
 
-input group "=== キャリーの層（方式 8 と一緒に動く。商品CFDの口座用。107章） ==="
+input group "=== キャリーの層（研究用・採用していない。実際の口座では注文を出さず、判定とスワップの記録だけ。107章） ==="
 input string           InpCrSymbols         = "none";      // スワップが受け取りになる向きと流れがそろったときだけ持つ銘柄（カンマ区切り。none なら使わない。例：USOIL,NATGAS）
 input double           InpCrUnitVol         = 10.0;        // キャリー：1銘柄の建玉の値動き（口座に対する年率 %）
 input double           InpCrMinSwapPct      = 0.0;         // キャリー：持つために必要な、スワップの受け取り（値段に対する年 %。0 = 受け取りならよい）
@@ -1397,9 +1397,15 @@ int OnInit(void)
             crSyms[n] = sym;
            }
         }
+      // 107章：この層は採用していない。OANDA の値段の作りどおり（期近の先物を参照）に計算し直すと基準に届かず、
+      // 口座に表示されるスワップも、先物の値段の傾きと向きが合わない銘柄があった（確かめた日は8銘柄のうち3つ）。
+      // そのため、実際の口座では注文を出さず、判定とスワップの記録だけを行う（テスターでは、動作の確認のために売買する）。
+      const bool crObserve = (InpIxDryRun || !MQLInfoInteger(MQL_TESTER));
+      if(ArraySize(crSyms) > 0 && !InpIxDryRun && !MQLInfoInteger(MQL_TESTER))
+         Print("[AMS] キャリーの層：採用していない層のため、実際の口座では注文を出しません（判定とスワップの記録だけ。107章）");
       g_crOn = (ArraySize(crSyms) > 0) &&
                g_crSleeve.Init(InpMagic + 7, crSyms, InpCrUnitVol, InpCrMinSwapPct, InpCrTrendDays, InpCrCheckDays, InpCrSLVolMul,
-                               InpCrMaxLev, InpIxBand, InpIxDelayMin, InpCrMaxSpreadPct, InpIxDryRun, InpIxEquityOffset);
+                               InpCrMaxLev, InpIxBand, InpIxDelayMin, InpCrMaxSpreadPct, crObserve, InpIxEquityOffset);
       if(!g_ixOn && !g_crOn)
         {
          Print("[AMS] 指数の層・キャリーの層：取引できる銘柄がありません");
