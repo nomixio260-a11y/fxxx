@@ -1,0 +1,5 @@
+run=861 mode=backtest period=H1 model=1 exec=default from=2026.11.02 to=2026.11.20 symbols=default deposit=3000000 preset=none inputs=InpListSymbols=true account=commodity leverage=20
+RESULT net=0 | pf=0.00 | trades=0 | win=0(0.00%) | dd=0%(0)
+SAMPLE sl_hit=0 tp_hit=0 closed_by_ea=0 stop_out=0
+SKIPS total=0
+SKIP_REASONS
