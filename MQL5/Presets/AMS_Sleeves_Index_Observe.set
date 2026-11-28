@@ -32,3 +32,14 @@ InpIxRegimeThr=1.0
 InpIxRegimeRef=US500
 InpIxDryRun=true
 InpIxEquityOffset=0
+; Probability sleeve (chapter 109), SHADOW: no orders. The EA writes the completed daily bars, tools/eco/predict.py turns them
+; into probabilities (4 models averaged), and the EA logs what it would hold. The record is kept in reports/live_index/AMS_prob_log.csv.
+InpPbSymbols=US500,US100,US30,JP225,GER30,UK100,FRA40,EU50,NL25,AUS200,HK50,CHINA50,SING30,US2000
+InpPbFile=AMS_prob.csv
+InpPbUnitVol=5.0
+InpPbLongOnly=true
+InpPbVolDays=20
+InpPbSLVolMul=4.0
+InpPbMaxLev=2.0
+InpPbWaitMin=30
+InpPbShadow=true

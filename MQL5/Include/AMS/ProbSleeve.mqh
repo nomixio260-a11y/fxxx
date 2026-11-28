@@ -59,6 +59,7 @@ private:
    datetime          m_retryAt[];
    int               m_retryCount[];
    datetime          m_warnAt[];
+   datetime          m_exportBar[];   // 日足を書き出した足（実運用：予想を作るスクリプトに渡す）
    bool              m_tradeFail;
    int               m_cntOpen, m_cntClose, m_cntRetry, m_cntStopFail, m_cntMiss, m_cntDays, m_cntLong, m_cntShort;
 
@@ -75,6 +76,7 @@ private:
    void              Warn(const int i, const string msg);
    bool              LoadFile(void);
    void              ReloadIfChanged(void);
+   void              ExportBars(const int i);
    bool              Lookup(const int i, const datetime day, double &z, double &p);
 
 public:
@@ -118,6 +120,7 @@ bool CProbSleeve::Init(const ulong magic, const string &syms[], const string &ke
    ArrayResize(m_retryAt, m_n);
    ArrayResize(m_retryCount, m_n);
    ArrayResize(m_warnAt, m_n);
+   ArrayResize(m_exportBar, m_n);
    for(int i = 0; i < m_n; i++)
      {
       m_sym[i]        = syms[i];
@@ -130,6 +133,7 @@ bool CProbSleeve::Init(const ulong magic, const string &syms[], const string &ke
       m_retryAt[i]    = 0;
       m_retryCount[i] = 0;
       m_warnAt[i]     = 0;
+      m_exportBar[i]  = 0;
       SymbolSelect(m_sym[i], true);
      }
    if(m_n <= 0)
@@ -203,7 +207,7 @@ void CProbSleeve::ReloadIfChanged(void)
   {
    if(MQLInfoInteger(MQL_TESTER))
       return;
-   const datetime now = TimeCurrent();
+   const datetime now = TimeTradeServer();
    if((long)now - (long)m_fileCheck < 60)
       return;
    m_fileCheck = now;
@@ -214,6 +218,37 @@ void CProbSleeve::ReloadIfChanged(void)
    FileClose(fh);
    if(stamp != m_fileStamp)
       LoadFile();
+  }
+
+//+------------------------------------------------------------------+
+//| 実運用：確定した日足を共通フォルダに書き出す（AMS_pb_bars_<銘柄>.csv）。    |
+//|  予想を作るスクリプト（tools/eco/predict.py）がこれを読んで、その日足の     |
+//|  予想を AMS_prob.csv に書く。書きかけを読まれないように、別名で書いてから   |
+//|  名前を替える。                                                      |
+//+------------------------------------------------------------------+
+void CProbSleeve::ExportBars(const int i)
+  {
+   MqlRates rt[];
+   ArraySetAsSeries(rt, false);
+   const int got = CopyRates(m_sym[i], PERIOD_D1, 1, 1500, rt);            // 確定した日足だけ
+   if(got < 400)
+     {
+      Warn(i, StringFormat("日足の履歴がまだ足りないため、予想用の書き出しを待ちます（%d 本）", got));
+      return;
+     }
+   const string tmp = "AMS_pb_bars_" + m_key[i] + ".tmp";
+   const string dst = "AMS_pb_bars_" + m_key[i] + ".csv";
+   const int fh = FileOpen(tmp, FILE_WRITE | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+      return;
+   const int dg = (int)SymbolInfoInteger(m_sym[i], SYMBOL_DIGITS);
+   FileWriteString(fh, "date,open,high,low,close\n");
+   for(int k = 0; k < got; k++)
+      FileWriteString(fh, StringFormat("%s,%s,%s,%s,%s\n", TimeToString(rt[k].time, TIME_DATE), DoubleToString(rt[k].open, dg), DoubleToString(rt[k].high, dg),
+                                       DoubleToString(rt[k].low, dg), DoubleToString(rt[k].close, dg)));
+   FileClose(fh);
+   if(FileMove(tmp, FILE_COMMON, dst, FILE_COMMON | FILE_REWRITE))
+      m_exportBar[i] = rt[got - 1].time;
   }
 
 //+------------------------------------------------------------------+
@@ -290,7 +325,7 @@ double CProbSleeve::ToTick(const string sym, const double price)
 //+------------------------------------------------------------------+
 void CProbSleeve::Warn(const int i, const string msg)
   {
-   const datetime now = TimeCurrent();
+   const datetime now = TimeTradeServer();
    if((long)now - (long)m_warnAt[i] < 6 * 3600)
       return;
    m_warnAt[i] = now;
@@ -473,13 +508,16 @@ bool CProbSleeve::Process(const int i, const datetime t0)
    const double var      = (s2 - s1 * s1 / m_volDays) / (m_volDays - 1);
    const double dailyVol = (var > 0.0) ? MathSqrt(var) : 0.0;
    const double annVol   = MathMax(dailyVol * MathSqrt(252.0), 0.025);
+   //--- 実運用：この日足をまだ書き出していなければ、予想を作るスクリプトに渡すために書き出す
+   if(!MQLInfoInteger(MQL_TESTER) && m_exportBar[i] != raw[gotRaw - 1].time)
+      ExportBars(i);
    //--- 予想（確定した最後の日足の日付の行）
    ReloadIfChanged();
    double z = 0.0, p = 0.0;
    const bool found = Lookup(i, rt[got - 1].time, z, p);
-   if(!found && !MQLInfoInteger(MQL_TESTER) && (long)TimeCurrent() - (long)m_seenAt[i] < m_delaySec + m_waitSec)
+   if(!found && !MQLInfoInteger(MQL_TESTER) && (long)TimeTradeServer() - (long)m_seenAt[i] < m_delaySec + m_waitSec)
      {
-      m_retryAt[i] = TimeCurrent() + 30;                                    // 実運用：予想がファイルに届くのを待つ
+      m_retryAt[i] = TimeTradeServer() + 30;                                    // 実運用：予想がファイルに届くのを待つ
       return(false);
      }
    m_cntDays++;
@@ -538,7 +576,7 @@ bool CProbSleeve::Process(const int i, const datetime t0)
         }
       ApplyStops(sym, dailyVol);
      }
-   if(m_dryRun || !MQLInfoInteger(MQL_TESTER))
+   if(!MQLInfoInteger(MQL_TESTER))
       PrintFormat("[AMS] 確率の層：%s 日足 %s の予想 %s → %s、目標 %.2f lot（値動きの見積もり 年 %.1f%%、今の建玉 %+.2f lot、値段 %s）", sym,
                   TimeToString(rt[got - 1].time, TIME_DATE), found ? StringFormat("確率 %.1f%%・z %+.2f", p * 100.0, z) : "なし",
                   dir > 0 ? "買い" : (dir < 0 ? "売り" : "持たない"), tl, annVol * 100.0, cur,
@@ -550,7 +588,7 @@ bool CProbSleeve::Process(const int i, const datetime t0)
       m_retryCount[i]++;
       if(m_retryCount[i] <= 120)
         {
-         m_retryAt[i] = TimeCurrent() + 30;
+         m_retryAt[i] = TimeTradeServer() + 30;
          m_cntDays--;
          return(false);
         }
@@ -563,7 +601,8 @@ bool CProbSleeve::Process(const int i, const datetime t0)
 //+------------------------------------------------------------------+
 void CProbSleeve::OnTick(void)
   {
-   const datetime now = TimeCurrent();
+   // 時計は TimeTradeServer（ティックが止まっていても進む、サーバーの時刻の見積もり）。週末の観察でも、予想の到着を待ったり、やり直したりできる
+   const datetime now = TimeTradeServer();
    for(int i = 0; i < m_n; i++)
      {
       const datetime t0 = iTime(m_sym[i], PERIOD_D1, 0);
@@ -581,9 +620,10 @@ void CProbSleeve::OnTick(void)
       MqlTick tk;
       if(!SymbolInfoTick(m_sym[i], tk) || tk.bid <= 0.0 || tk.ask <= 0.0)
          continue;
-      if((long)now - (long)tk.time > 600)
+      //--- 値段が古い・スプレッドが広いあいだは、売買を待つ。影のモード（注文を出さない）のときは、待たずに記録する
+      if(!m_dryRun && (long)now - (long)tk.time > 600)
          continue;
-      if(m_maxSpreadPct > 0.0 && (tk.ask - tk.bid) / tk.bid * 100.0 > m_maxSpreadPct)
+      if(!m_dryRun && m_maxSpreadPct > 0.0 && (tk.ask - tk.bid) / tk.bid * 100.0 > m_maxSpreadPct)
         {
          Warn(i, StringFormat("スプレッドが広いため待ちます（%.3f%%、上限 %.3f%%）", (tk.ask - tk.bid) / tk.bid * 100.0, m_maxSpreadPct));
          continue;

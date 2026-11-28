@@ -62,6 +62,8 @@ def add_ensembles(P):
     exps = [k for k in EXPERTS if k in P.columns]
     L = np.column_stack([logit(P[k].values) for k in exps])
     P["p_avg"] = sig(np.nanmean(L, axis=1))
+    if "p_reg" in P.columns:                                # 毎日の予想に使う形：KNN を除いた4つの平均（tools/eco/final.py・predict.py）
+        P["p_avg4"] = sig(np.nanmean(np.column_stack([logit(P[k].values) for k in ("p_lr", "p_gbm", "p_cnn", "p_reg")]), axis=1))
     L = np.nan_to_num(L)
     yr = P["date"].dt.year.values
     # ルールを「専門家」にする：その種類の、前の年までの「ルールの数 → 上がった割合」（ロジスティック）
@@ -151,6 +153,8 @@ def main():
     P, W, exps = add_ensembles(P)
     singles = [(EXPERT_LABEL[c], c) for c in exps]
     engines = [("AVG 専門家の平均", "p_avg"), ("META 上位のモデル", "p_meta"), ("HEDGE 専門家の重みづけ", "p_hedge")]
+    if "p_avg4" in P.columns:
+        engines.insert(1, ("AVG4 毎日の予想に使う4つの平均（KNN を除く）", "p_avg4"))
     models = singles + engines
     L = [f"# 複合システム {ver}：予想の確率と、確率に比例して持つ売買の検証（`tools/eco/evaluate.py {ver}`）", "",
          f"学習に使っていない年の予想だけで測る（{P['date'].min().date()}〜{P['date'].max().date()}、{len(P):,} 行、{P['inst'].nunique()} 銘柄）。", "",

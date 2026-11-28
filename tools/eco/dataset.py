@@ -36,8 +36,32 @@ ETFS = ("SPY", "QQQ", "DIA", "IWM", "MDY", "IJR", "VTI", "IWF", "IWD", "XLB", "X
 EXTRA = ("st_r2", "st_d7", "st_ibs", "st_n", "vix_rank", "vix_chg1", "vix_chg5", "is_index", "is_fx", "is_metal")
 
 
+def vix_close():
+    """VIX の日次の終値。CBOE の公表値（実運用の tools/ci/fetch_vix.ps1・毎日の予想 tools/eco/predict.py と同じ出どころ）。取れなければ Yahoo Finance。
+    Yahoo Finance の値は、米国の祝日の行がなく（CFD は祝日も動く）、終値が公表値と違う日もあるため、検証と実運用をそろえる目的で公表値を使う。"""
+    import re
+    import subprocess
+    os.makedirs(CACHE, exist_ok=True)
+    f = os.path.join(CACHE, "vix_cboe.csv")
+    if not os.path.exists(f) or os.path.getsize(f) < 100000:
+        try:
+            subprocess.run(["curl", "-sS", "-L", "-m", "120", "-A", "Mozilla/5.0", "-o", f, "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"], check=True)
+        except Exception as e:                                  # noqa: BLE001
+            print("VIX（CBOE）の取得に失敗:", e)
+    rows = {}
+    if os.path.exists(f):
+        for line in open(f, encoding="ascii", errors="ignore"):
+            m = re.match(r"^\s*(\d{2})/(\d{2})/(\d{4}),[^,]*,[^,]*,[^,]*,\s*([0-9.]+)\s*$", line)
+            if m:
+                rows[pd.Timestamp(int(m.group(3)), int(m.group(1)), int(m.group(2)))] = float(m.group(4))
+    if len(rows) < 5000:
+        print("注意：VIX は Yahoo Finance の値を使います（CBOE の公表値が取れませんでした）")
+        return Y.fetch("VIX")["close"].dropna()
+    return pd.Series(rows).sort_index()
+
+
 def vix_features():
-    v = Y.fetch("VIX")["close"].dropna()
+    v = vix_close()
     lr = np.log(v).diff()
     out = pd.DataFrame({"vix_rank": v.rolling(250).rank(pct=True) * 2 - 1, "vix_chg1": (lr / lr.rolling(250).std()).clip(-6, 6),
                         "vix_chg5": (np.log(v / v.shift(5)) / (lr.rolling(250).std() * np.sqrt(5))).clip(-6, 6)})

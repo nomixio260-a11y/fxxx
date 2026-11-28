@@ -22,6 +22,41 @@ if ((Get-Content (Join-Path $repo "MQL5\Presets\$preset") -ErrorAction SilentlyC
   try { & (Join-Path $PSScriptRoot 'fetch_vix.ps1') } catch { Write-Host "注意：VIX の取得に失敗しました（$($_.Exception.Message)）" }
 }
 
+# 確率の層（109章。プリセットに InpPbSymbols があるとき）：EA が書き出した日足から、毎日の予想を作るスクリプト（tools/eco/predict.py）を動かす。
+#   - 予想の記録（AMS_prob_log.csv）は、成績の置き場所に入れてリポジトリに残し、次の回に引き継ぐ
+#   - 準備に失敗しても止めない（予想がなければ、確率の層は何も持たない）
+$pbOn = $false
+$pbFile = 'AMS_prob.csv'
+foreach ($line in (Get-Content (Join-Path $repo "MQL5\Presets\$preset") -ErrorAction SilentlyContinue)) {
+  if ($line -match '^\s*InpPbSymbols\s*=\s*(\S+)\s*$' -and $matches[1] -ne 'none' -and $matches[1] -ne '-') { $pbOn = $true }
+  if ($line -match '^\s*InpPbFile\s*=\s*(\S+)\s*$') { $pbFile = $matches[1] }
+}
+if ($pbOn) {
+  try {
+    & python -m pip install --quiet --disable-pip-version-check numpy pandas lightgbm 2>&1 | Select-Object -Last 2 | ForEach-Object { Write-Host "[pip] $_" }
+    if ($LASTEXITCODE -ne 0) { throw "pip が失敗しました（$LASTEXITCODE）" }
+    Remove-Item (Join-Path $common 'AMS_pb_bars_*.csv'), (Join-Path $common $pbFile) -ErrorAction SilentlyContinue   # 前の回の残りは使わない（毎回、いまの日足から作り直す）
+    $pbLogRepo = Join-Path $outDir 'AMS_prob_log.csv'
+    if (Test-Path $pbLogRepo) { Copy-Item $pbLogRepo (Join-Path $common 'AMS_prob_log.csv') -Force }
+    Write-Host '確率の層：毎日の予想を作る準備ができました'
+  } catch {
+    Write-Host "注意：確率の層の準備に失敗しました（$($_.Exception.Message)）。予想は作られず、確率の層は何も持ちません"
+    $pbOn = $false
+  }
+}
+# EA が書き出した日足が、予想のファイルより新しければ、予想を作り直す
+function Update-Prob {
+  $bars = @(Get-ChildItem $common -Filter 'AMS_pb_bars_*.csv' -ErrorAction SilentlyContinue)
+  if ($bars.Count -eq 0) { return }
+  $probPath = Join-Path $common $pbFile
+  $newest = ($bars | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).LastWriteTimeUtc
+  if ((Test-Path $probPath) -and (Get-Item $probPath).LastWriteTimeUtc -ge $newest) { return }
+  try {
+    & python (Join-Path $repo 'tools\eco\predict.py') --bars $common --vix (Join-Path $common 'AMS_vix.csv') --out $probPath --log (Join-Path $common 'AMS_prob_log.csv') 2>&1 |
+      ForEach-Object { Write-Host "[predict] $_" }
+  } catch { Write-Host "注意：予想の作成に失敗しました（$($_.Exception.Message)）" }
+}
+
 # 終わる時刻を決める（UTC、tools/ci/schedule.ps1）。
 #   取引の時間帯の途中で回を入れ替えない。UTC 4:00 ごろにサーバーごと止まる問題を避けるため、東京の朝の回は 3:35 までに終えて保存し、
 #   UTC 3:10〜4:20 に始まった回は 4:20 まで MT5 を起動せずに待つ。計算に失敗したときは、決めた分数だけ動かす。
@@ -90,7 +125,7 @@ try {
     $ea  = @(Show-NewLines "$dir\MQL5\Logs\*.log" 'ea')
     foreach ($l in $ea) { if ($l -match '\[AMS\]') { $eaLines.Add($l) } }
     if ($new | Where-Object { $_ -match 'authorization on .* failed' }) { Write-Host 'NG: ログインに失敗しました'; break }
-    Start-Sleep -Seconds 60
+    if ($pbOn) { Update-Prob; Start-Sleep -Seconds 20 } else { Start-Sleep -Seconds 60 }
   }
   if ($script:authorized) { Write-Host 'ログインできました' } else { Write-Host '注意：ログインの成功をログで確認できませんでした' }
 } finally {
@@ -107,6 +142,11 @@ foreach ($l in @(Show-NewLines "$dir\MQL5\Logs\*.log" 'ea')) { if ($l -match '\[
 foreach ($f in 'AMS_live_deals.csv', 'AMS_live_account.csv') {
   $src = Join-Path $common $f
   if (Test-Path $src) { Get-Content $src | Out-File (Join-Path $outDir $f) -Encoding utf8 }
+}
+# 確率の層の予想の記録（モデルごとの確率と、合成した確率・z。あとで当たり外れを採点する：tools/eco/shadow_score.py）
+if ($pbOn) {
+  $pl = Join-Path $common 'AMS_prob_log.csv'
+  if (Test-Path $pl) { Copy-Item $pl (Join-Path $outDir 'AMS_prob_log.csv') -Force; Write-Host "予想の記録：$((Get-Content $pl | Measure-Object -Line).Lines - 1) 行" }
 }
 # スワップの記録（キャリーの層が、起動のたびにその日の値を書き出す）。日付と銘柄が同じ行は1つだけ残して、ためていく
 $swToday = Join-Path $common 'AMS_swaps_today.csv'

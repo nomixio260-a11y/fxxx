@@ -229,6 +229,35 @@ def build(d):
 FEATURES = None
 
 
+def rule_states(d):
+    """いまの戻りの層の「持っている状態」（R2・D7・IBS とその数）。tools/research/index_reversion.py の rules と同じ計算
+    （毎日の予想を出すスクリプトが、研究用のモジュールを読み込まずに済むように、ここにも置く。同じ結果になることは tools/eco/final.py が確かめる）。"""
+    c = d["close"]
+    up = c > c.rolling(200).mean()
+    dl = c.diff()
+    ru = dl.clip(lower=0).ewm(alpha=0.5, adjust=False).mean()
+    rd = (-dl.clip(upper=0)).ewm(alpha=0.5, adjust=False).mean()
+    r2 = 100.0 - 100.0 / (1.0 + ru / rd.replace(0, np.nan))
+
+    def hold(entry, exit_):
+        e, x = entry.values, exit_.values
+        p, cur = np.zeros(len(e)), 0.0
+        for i in range(len(e)):
+            if cur == 0.0:
+                if e[i]:
+                    cur = 1.0
+            elif x[i]:
+                cur = 0.0
+            p[i] = cur
+        return p
+    rng = d["high"] - d["low"]
+    ibs = ((c - d["low"]) / rng.where(rng > 0)).fillna(0.5)
+    out = pd.DataFrame({"st_r2": hold(up & (r2 < 10), c > c.rolling(5).mean()), "st_d7": hold(up & (c <= c.rolling(7).min()), c >= c.rolling(7).max()),
+                        "st_ibs": (ibs < 0.2).astype(float).values}, index=d.index)
+    out["st_n"] = out["st_r2"] + out["st_d7"] + out["st_ibs"]
+    return out
+
+
 def names():
     global FEATURES
     if FEATURES is None:

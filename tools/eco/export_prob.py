@@ -7,7 +7,7 @@
 - z ＝（確率 − ふだんの水準）÷ ばらつき を ±2 で打ち切ったもの。水準とばらつきは、前の年までの指数の予想から計算する（evaluate.py の zscore と同じ）。
   つまり、どの行も、その日までに分かっていたことだけで作られている。
 - あわせて、EA と同じ形（毎日、z に比例した大きさに合わせる・買いだけ・コスト込み）で計算した資産の動きを出す。MT5 のテスターの結果と突き合わせるため。
-使い方: python3 tools/eco/export_prob.py v2 hedge [開始日 終了日 単位]
+使い方: python3 tools/eco/export_prob.py v2 avg4 [開始日 終了日 単位]   （エンジン：avg4＝毎日の予想に使う4つの平均・avg・meta・hedge）
 """
 import os
 import sys
@@ -52,7 +52,7 @@ def mimic(P, syms, start, end, unit, long_only=True, swap_long=-4.79, spread=0.0
 
 def main():
     ver = sys.argv[1] if len(sys.argv) > 1 else "v2"
-    engine = sys.argv[2] if len(sys.argv) > 2 else "hedge"
+    engine = sys.argv[2] if len(sys.argv) > 2 else "avg4"
     dst, n, P = export(ver, engine)
     print(f"{dst}: {n} 行")
     if len(sys.argv) > 5:

@@ -242,7 +242,7 @@ input int              InpPbVolDays         = 20;          // 確率：値動き
 input double           InpPbSLVolMul        = 4.0;         // 確率：逆指値（1日の値動きの何倍か。毎日置き直す。0 で置かない）
 input double           InpPbMaxLev          = 2.0;         // 確率：1銘柄の建玉の額 ÷ 有効証拠金 の上限
 input int              InpPbWaitMin         = 30;          // 確率：実運用で、その日足の予想がファイルに届くのを待つ分数（届かなければ、その日は持たない）
-input bool             InpPbShadow          = true;        // 確率：影のモード（実際の口座では注文を出さず、確率と判定を記録するだけ。テスターでは売買する）。昇格の基準を満たすまで true
+input bool             InpPbShadow          = true;        // 確率：影のモード（注文を出さず、確率と判定を記録するだけ）。昇格の基準を満たすまで true。テスターで売買を検証するときだけ false
 
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
@@ -1445,8 +1445,9 @@ int OnInit(void)
             pbKeys[n] = rawPb[i];
            }
         }
-      // 影のモード：昇格の基準（tools/eco/evaluate.py）を満たすまでは、実際の口座では注文を出さない（テスターでは、検証のために売買する）
-      const bool pbObserve = (InpIxDryRun || (InpPbShadow && !MQLInfoInteger(MQL_TESTER)));
+      // 影のモード：昇格の基準（tools/eco/evaluate.py）を満たすまでは、注文を出さず、確率と判定を記録するだけ。
+      // テスターで売買の検証をするときは、InpPbShadow=false を明示する（プリセットに影の層を入れても、プリセットの検証の結果は変わらない）
+      const bool pbObserve = (InpIxDryRun || InpPbShadow);
       g_pbOn = (ArraySize(pbSyms) > 0) &&
                g_pbSleeve.Init(InpMagic + 8, pbSyms, pbKeys, InpPbFile, InpPbUnitVol, InpPbLongOnly, InpPbVolDays, InpPbSLVolMul, InpPbMaxLev,
                                InpIxBand, InpIxDelayMin, InpPbWaitMin, InpIxMaxSpreadPct, pbObserve, InpIxEquityOffset);
