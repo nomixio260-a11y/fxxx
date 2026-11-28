@@ -108,6 +108,22 @@ foreach ($f in 'AMS_live_deals.csv', 'AMS_live_account.csv') {
   $src = Join-Path $common $f
   if (Test-Path $src) { Get-Content $src | Out-File (Join-Path $outDir $f) -Encoding utf8 }
 }
+# スワップの記録（キャリーの層が、起動のたびにその日の値を書き出す）。日付と銘柄が同じ行は1つだけ残して、ためていく
+$swToday = Join-Path $common 'AMS_swaps_today.csv'
+if (Test-Path $swToday) {
+  $swAll = Join-Path $outDir 'AMS_swaps.csv'
+  $rows = @(Get-Content $swToday)
+  if ($rows.Count -gt 1) {
+    $have = @()
+    if (Test-Path $swAll) { $have = @(Get-Content $swAll -Encoding utf8) }
+    if ($have.Count -eq 0) { $have = @($rows[0]) }
+    $keys = @{}
+    foreach ($l in $have | Select-Object -Skip 1) { $c = $l -split ','; if ($c.Count -ge 2) { $keys["$($c[0]),$($c[1])"] = $true } }
+    foreach ($l in $rows | Select-Object -Skip 1) { $c = $l -split ','; if ($c.Count -ge 2 -and -not $keys.ContainsKey("$($c[0]),$($c[1])")) { $have += $l } }
+    $have | Out-File $swAll -Encoding utf8
+    Write-Host "スワップの記録：$($rows.Count - 1) 行（$swAll）"
+  }
+}
 # 研究用の書き出し（観察モードの InpIxExportSymbols）。リポジトリには入れず、ワークフローの成果物として残す
 $exp = @(Get-ChildItem $common -Filter 'AMS_d1_*.csv' -ErrorAction SilentlyContinue) + @(Get-ChildItem $common -Filter 'AMS_ix_symbols.csv' -ErrorAction SilentlyContinue)
 if ($exp.Count -gt 0) {

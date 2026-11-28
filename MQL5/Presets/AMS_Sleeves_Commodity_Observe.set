@@ -1,5 +1,6 @@
 ; AdaptiveMultiStrategyEA - commodity CFD account, OBSERVATION ONLY (chapter 105). No orders are sent (InpIxDryRun=true).
 ; Logs the account and symbol conditions, the gold trend state, and exports daily bars of the commodity symbols for research.
+; Also logs the swaps and the carry-sleeve state of the futures-based commodities (chapter 107) and records the swaps in reports/live_commodity/AMS_swaps.csv.
 ; Run with the workflow input trading=false (the default of mt5-live-commodity.yml).
 InpEntryMode=8
 InpIxRevSymbols=none
@@ -33,3 +34,10 @@ InpIxRegimeRef=none
 InpIxDryRun=true
 InpIxEquityOffset=0
 InpIxExportSymbols=XAUUSD,XAGUSD,COPPER,USOIL,UKOIL,NATGAS,CORN,SOYBEANS,SUGAR,WHEAT,US500,US100,JP225
+InpCrSymbols=USOIL,NATGAS,UKOIL,COPPER,CORN,SOYBEANS,SUGAR,WHEAT
+InpCrUnitVol=10.0
+InpCrMinSwapPct=0.0
+InpCrTrendDays=200
+InpCrCheckDays=7
+InpCrSLVolMul=4.0
+InpCrMaxLev=2.0

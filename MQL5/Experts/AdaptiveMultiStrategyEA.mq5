@@ -19,6 +19,7 @@
 #include <AMS\Modules.mqh>
 #include <AMS\CarryTrend.mqh>
 #include <AMS\IndexSleeves.mqh>
+#include <AMS\CarrySleeve.mqh>
 
 //==================================================================
 // 入力パラメータ
@@ -221,6 +222,15 @@ input double           InpIxSoGuard         = 0.9;         // 強制ロスカッ
 input int              InpIxDelayMin        = 5;           // 新しい日足が始まってから、売買するまで待つ分数（再開の直後のスプレッド拡大を避けるため）
 input double           InpIxMaxSpreadPct    = 0.05;        // スプレッドがこの割合（値段に対する %）を超えているあいだは売買を待つ（0で無効）
 
+input group "=== キャリーの層（方式 8 と一緒に動く。商品CFDの口座用。107章） ==="
+input string           InpCrSymbols         = "none";      // スワップが受け取りになる向きと流れがそろったときだけ持つ銘柄（カンマ区切り。none なら使わない。例：USOIL,NATGAS）
+input double           InpCrUnitVol         = 10.0;        // キャリー：1銘柄の建玉の値動き（口座に対する年率 %）
+input double           InpCrMinSwapPct      = 0.0;         // キャリー：持つために必要な、スワップの受け取り（値段に対する年 %。0 = 受け取りならよい）
+input int              InpCrTrendDays       = 200;         // キャリー：流れを見る日数（終値がこの日数の平均より上なら買いだけ、下なら売りだけ）
+input int              InpCrCheckDays       = 7;           // キャリー：見直す間隔（日）
+input double           InpCrSLVolMul        = 4.0;         // キャリー：逆指値（1日の値動きの何倍か。毎日置き直す。0 で置かない）
+input double           InpCrMaxLev          = 2.0;         // キャリー：1銘柄の建玉の額 ÷ 有効証拠金 の上限
+
 input group "=== バックテストの評価 ==="
 input int              InpScoreMinTrades    = 20;          // 評価値を出す最低取引数
 input double           InpScoreMaxDD        = 60.0;        // 最大DD（%）がこれを超えたら評価値 0
@@ -233,6 +243,9 @@ CCarryTrend g_carry;          // 方式 7（金利差＋トレンド）
 bool        g_carryMode = false;
 CIndexSleeves g_sleeves;      // 方式 8（株価指数・金の層）
 bool        g_sleevesMode = false;
+bool        g_ixOn        = false;   // 方式 8 のうち、指数・金の層が動いているか
+CCarrySleeve g_crSleeve;      // キャリーの層（方式 8 と一緒に動く）
+bool        g_crOn        = false;
 double g_weights[4][AMS_STRATEGY_COUNT];   // [REGIME][STRATEGY]
 double g_peakEquity = 0.0;
 double g_monthStartBal = 0.0;   // 月初の残高（月間目標の判定用）
@@ -1351,7 +1364,7 @@ int OnInit(void)
               }
            }
         }
-      if(!g_sleeves.Init(GetPointer(g_trade), InpMagic, revSyms, trendSyms, InpIxRuleR2, InpIxRuleD7, InpIxRuleIBS, InpIxRevUnitVol,
+      g_ixOn = g_sleeves.Init(GetPointer(g_trade), InpMagic, revSyms, trendSyms, InpIxRuleR2, InpIxRuleD7, InpIxRuleIBS, InpIxRevUnitVol,
                          InpIxTrendUnitVol, InpIxTrendCheckDays, InpIxMaxLev, InpMaxMarginUsePct, InpIxBand, InpIxSLVolMul,
                          InpIxDelayMin, InpIxMaxSpreadPct, InpIxVolModel,
                          (InpIxVixFile == "none" || InpIxVixFile == "-") ? "" : InpIxVixFile, InpIxVixLowMult, InpIxVixHighMult,
@@ -1359,9 +1372,36 @@ int OnInit(void)
                          InpIxJointRound, InpIxJointEps, InpIxWarmStart, InpIxRegimeDays, InpIxRegimeThr,
                          (InpIxRegimeRef == "none" || InpIxRegimeRef == "-") ? "" : InpIxRegimeRef, InpIxDryRun, InpIxEquityOffset,
                          (InpIxExportSymbols == "none" || InpIxExportSymbols == "-") ? "" : InpIxExportSymbols,
-                         InpIxTestRestartMin, InpIxTestLoseState))
+                         InpIxTestRestartMin, InpIxTestLoseState);
+      //--- キャリーの層（商品CFD）。指数の層とは別のマジックナンバーで、建玉を分けて数える
+      string crSyms[];
+      if(InpCrSymbols != "none" && InpCrSymbols != "-" && InpCrSymbols != "")
         {
-         Print("[AMS] 指数の層：取引できる銘柄がありません");
+         string rawCr[];
+         const int cntCr = StringSplit(InpCrSymbols, ',', rawCr);
+         for(int i = 0; i < cntCr; i++)
+           {
+            StringTrimLeft(rawCr[i]);
+            StringTrimRight(rawCr[i]);
+            if(rawCr[i] == "")
+               continue;
+            const string sym = ResolveSymbol(rawCr[i]);
+            if(sym == "")
+              {
+               PrintFormat("[AMS] 銘柄 %s は口座に無いため除外します", rawCr[i]);
+               continue;
+              }
+            const int n = ArraySize(crSyms);
+            ArrayResize(crSyms, n + 1);
+            crSyms[n] = sym;
+           }
+        }
+      g_crOn = (ArraySize(crSyms) > 0) &&
+               g_crSleeve.Init(InpMagic + 7, crSyms, InpCrUnitVol, InpCrMinSwapPct, InpCrTrendDays, InpCrCheckDays, InpCrSLVolMul,
+                               InpCrMaxLev, InpIxBand, InpIxDelayMin, InpIxMaxSpreadPct, InpIxDryRun, InpIxEquityOffset);
+      if(!g_ixOn && !g_crOn)
+        {
+         Print("[AMS] 指数の層・キャリーの層：取引できる銘柄がありません");
          return(INIT_FAILED);
         }
       g_sleevesMode = true;
@@ -1438,7 +1478,12 @@ void OnDeinit(const int reason)
   {
    EventKillTimer();
    if(g_sleevesMode)
-      g_sleeves.Summary();
+     {
+      if(g_ixOn)
+         g_sleeves.Summary();
+      if(g_crOn)
+         g_crSleeve.Summary();
+     }
    if(!MQLInfoInteger(MQL_TESTER))
      {
       SaveState();
@@ -1645,7 +1690,10 @@ void OnTick(void)
      }
    if(g_sleevesMode)
      {
-      g_sleeves.OnTick();
+      if(g_ixOn)
+         g_sleeves.OnTick();
+      if(g_crOn)
+         g_crSleeve.OnTick();
       return;
      }
    ProcessAll();
@@ -1658,7 +1706,10 @@ void OnTimer(void)
   {
    if(g_sleevesMode)
      {
-      g_sleeves.OnTick();
+      if(g_ixOn)
+         g_sleeves.OnTick();
+      if(g_crOn)
+         g_crSleeve.OnTick();
       static datetime lastIxExport = 0;
       if(TimeCurrent() - lastIxExport >= 3600)
         {
