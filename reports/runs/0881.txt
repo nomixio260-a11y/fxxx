@@ -1,0 +1,2 @@
+run=881 mode=backtest period=H1 model=1 exec=default from=2007.01.01 to=2026.11.13 symbols=default deposit=3000000 preset=none inputs=InpEntryMode=8;InpIxRevSymbols=none;InpIxTrendSymbols=XAUUSD;InpIxRuleR2=false;InpIxRuleD7=false;InpIxRuleIBS=false;InpIxRevUnitVol=0;InpIxMaxLev=10;InpIxMaxSpreadPct=0.05;InpMaxMarginUsePct=90;InpIxVolModel=0;InpIxVixFile=none;InpIxRuleWeights=1,2,3;InpIxWarmStart=true;InpIxRegimeDays=0;InpIxTrendUnitVol=50;InpIxSLVolMul=4 account=commodity leverage=100
+RESULT なし（テスト失敗）
