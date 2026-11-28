@@ -20,9 +20,19 @@
    (c) 指数の戻りの層との、日々の損益の相関が ±0.2 以内（2000年10月〜）
    (d) 株の急落の局面（2000年〜の11局面）の損益の合計が、マイナスでない
 - 追加（上の判定のあとで決めた。実装のための確かめで、成績を見て形を選び直すものではない）：
-   OANDA の CFD の値段は、期近と2番目を混ぜた連続の値段（乗り換えの段差がなく、水準は期近に近い）と分かった（下の 5）。
+   OANDA の CFD の値段は、乗り換えの段差がなく、水準は期近に付いていく連続の値段と分かった（下の 7）。
    EA が見られるのはこの値段なので、流れ（200日の平均）を「期近の値段そのまま」で判定する形（CC2s）でも同じ結果になるかを確かめる。
    さらに、乗り換えの日の前後の損益を数えない・業者の取り分を倍にする、という厳しめの条件でも、指数の層と合わせた効果が残るかを見る。
+- 追加2（OANDA の値段の作りを確かめたあとで決めた。cfd_construction.py。結果を見る前に決めた）：
+   OANDA の CFD は、期近の先物を参照し、期限の数日前に次の先物へ乗り換える（原油は約1営業日前、天然ガスは約3営業日前）。
+   公式の説明どおりなら、買いの損益（値段の変化 ＋ スワップ）は「参照している先物を持った損益 − 年2.5%」になる。
+   上の CC2・CC2s は「2番目の限月を持つ」計算だったので、参照どおり（期近を持ち、期限の lead 営業日前に乗り換える）の損益で計算し直す（下の 8）。
+   合図は2通り。どちらも、流れ（期近の値段と200日の平均）がそろったときだけ持つ：
+    S1 いまの傾き：12 × ln(期近 ÷ 2番目)（CC2s と同じ）
+    S2 乗り換えの時点で決まった傾き：直前の乗り換えの時点の 12 × ln(前の先物 ÷ 乗り換えた先の先物)。次の乗り換えまで変わらない。
+       OANDA のスワップは、公式の説明どおりなら、この傾きで決まる（プラスなら買いが受け取り）。
+   判定は上の (a)〜(d) と同じ。lead は 原油 1・天然ガス 3（cfd_construction.py の A2 による）で判定し、どちらも 1・3・5 にした場合を感度として並べる。
+   期近の値段がゼロ以下になった日（2020年4月20日）と次の日は、2番目の値動きを使う（OANDA の値段はマイナスにならず、早めに次の限月へ移っていた）。
 使い方: python3 -I tools/research/commodity_carry.py [商品の口座の書き出しのフォルダ]  → reports/research/commodity_carry.md
 """
 import os
@@ -154,6 +164,55 @@ def simulate(D, spread, form, kind, unit=0.10, check=7, drop=0, markup=MARKUP, r
     return (w * r.fillna(0.0) - cost), st, carry
 
 
+def active_returns(D, kind, lead):
+    """OANDA の CFD が参照している先物を持ったときの日々の値動き：期近を持ち、期限の lead 営業日前の終値で2番目に乗り換える。
+    戻り値：日々の値動き、乗り換えた先を持ちはじめる日（前の日の終値で乗り換え）。"""
+    _, is_roll = held_returns(D, kind)
+    r1 = D[1] / D[1].shift(1) - 1.0
+    r2 = D[2] / D[2].shift(1) - 1.0
+    use2 = np.zeros(len(D), dtype=bool)
+    sw = np.zeros(len(D), dtype=bool)
+    for p in np.flatnonzero(is_roll.values):
+        s_ = max(p - lead, 1)
+        use2[s_:p] = True
+        sw[s_] = True
+    bad = ((D[1] <= 0) | (D[1].shift(1) <= 0)).values           # 期近がゼロ以下の日と次の日
+    r = r1.where(~(use2 | bad), r2)
+    r = r.where(~is_roll.values, D[1] / D[2].shift(1) - 1.0)
+    return r, pd.Series(sw, index=D.index)
+
+
+def simulate_active(D, spread, kind, signal, lead, unit=0.10, check=7, markup=MARKUP):
+    """OANDA の作りどおりの損益（参照している先物の値動き − 業者の取り分 − スプレッド）。signal：S1（いまの傾き）・S2（乗り換えの時点で決まった傾き）。"""
+    r, sw = active_returns(D, kind, lead)
+    ok = (D[1] > 0) & (D[2] > 0)
+    cur = 12.0 * np.log((D[1] / D[2]).where(ok)) * 100.0
+    if signal == "S1":
+        carry = cur
+    else:
+        carry = cur.shift(1).where(sw.values).ffill()             # 乗り換えの直前の終値での傾きを、次の乗り換えまで使う
+    spot = D[1].where(D[1] > 0).ffill()
+    sma = spot.rolling(200).mean()
+    raw = pd.Series(0.0, index=D.index)
+    raw[(carry > MARKUP) & (spot > sma)] = 1.0
+    raw[(carry < -MARKUP) & (spot < sma)] = -1.0
+    raw = raw.where(sma.notna() & carry.notna())
+    st = np.full(len(D), np.nan)
+    last, c_ = None, np.nan
+    for i, t in enumerate(D.index):
+        if np.isnan(raw.iloc[i]):
+            continue
+        if last is None or (t - last).days >= check:
+            c_, last = raw.iloc[i], t
+        st[i] = c_
+    st = pd.Series(st, index=D.index)
+    sd = spot.pct_change().rolling(60).std()
+    w = (st * unit / np.maximum(sd * np.sqrt(ANN), 0.05)).shift(1).fillna(0.0)
+    days = pd.Series(D.index, index=D.index).diff().dt.days.fillna(1.0)
+    cost = (w - w.shift(1).fillna(0.0)).abs() * spread / 2.0 + w.abs() * markup / 100.0 / 360.0 * days
+    return (w * r.fillna(0.0) - cost), st, carry
+
+
 def sh(x):
     return x.mean() / x.std() * np.sqrt(ANN) if len(x) > 200 and x.std() > 0 else np.nan
 
@@ -192,9 +251,10 @@ def main():
         z = pd.concat([R[("原油（WTI）", form)], R[("天然ガス", form)]], axis=1, sort=True).dropna()
         c = z.mean(axis=1)
         mid = c.index[len(c) // 2]
-        both = pd.concat([idx, c], axis=1, sort=True).dropna()
+        both = pd.concat([idx, c], axis=1, sort=True)
         both.columns = ["i", "c"]
-        rho = both.corr().iloc[0, 1]
+        rho = both.dropna().corr().iloc[0, 1]
+        both = both[(both.index >= max(idx.index[0], c.index[0])) & (both.index <= min(idx.index[-1], c.index[-1]))].fillna(0.0)   # どちらかのデータがない日も落とさない
         ep = sum(float(c[(c.index > a) & (c.index <= b)].sum()) for _, a, b in EP)
         k = 0.5 * both["i"].std() / both["c"].std()
         mix = both["i"] + k * both["c"]
@@ -233,14 +293,21 @@ def main():
         c = pd.concat(rs, axis=1, sort=True).dropna().mean(axis=1)
         return rs, c
 
+    def joined(c):
+        """指数の口座とエネルギーの層を、同じ日付に並べる。EIA のデータには抜けている日がある（2001〜11年に約390日）ので、
+        どちらかがない日は損益 0 として残す（落とすと、指数の口座のその日の損益が消えて、年ごとの成績が変わってしまう）。"""
+        z = pd.concat([idx2, c], axis=1, sort=True)
+        z.columns = ["i", "c"]
+        return z[(z.index >= "2001-01-01") & (z.index <= c.index[-1])].fillna(0.0)
+
     def st20(r):
         e = (1 + r).cumprod()
         y = (1 + r).groupby(r.index.year).prod() - 1
-        return dict(cagr=e.iloc[-1] ** (ANN / len(r)) - 1, sh=sh(r), dd=(e / e.cummax() - 1).min(), wy=y.min(),
+        return dict(cagr=e.iloc[-1] ** (365.25 / (r.index[-1] - r.index[0]).days) - 1, sh=sh(r), dd=(e / e.cummax() - 1).min(), wy=y.min(),
                     ep=[float(np.prod(1 + r[(r.index > a) & (r.index <= b)]) - 1) for _, a, b in EP2])
     lines += ["", "## 5 実装できる形（CC2s：流れを、CFD の値段に近い「期近の値段そのまま」で判定）と、厳しめの条件", "",
               "右の4列は、指数の口座（戻り 5% ＋ 順張り 10%。現物の写し、2001年〜2024年4月）と同じ資金に対して、この層を「原油・天然ガスそれぞれ 値動き 年10%」（EA の設定 InpCrUnitVol=10 に当たる。層の合計の値動きは年10%ほど）で足し、最大の下落が指数だけのときと同じになるように全体を縮めた場合。", "",
-              "| 条件 | 原油 | 天然ガス | 合わせて | 前半／後半 | 急落の局面でプラス | 年率（指数だけ） | 急落の9局面の損益の合計（指数だけ） | 最悪の年（指数だけ） | シャープ（指数だけ） |", "|---|---|---|---|---|---|---|---|---|---|"]
+              "| 条件 | 原油 | 天然ガス | 合わせて | 前半／後半 | 急落の局面でプラス | 足しただけ（縮めない）：年率・最大の下落（指数だけ） | 同じ最大の下落に縮めた：年率（指数だけ） | 急落の9局面の損益の合計（指数だけ） | 最悪の年（指数だけ） | シャープ（指数だけ） |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     keep = {}
     for lab, kw in (("CC2（流れ：乗り換え込みの値段）", dict(form="CC2")), ("**CC2s（流れ：期近の値段そのまま）**", dict(form="CC2s")),
                     ("CC2s・乗り換えの日の損益を数えない", dict(form="CC2s", drop=1)), ("CC2s・その前後1日も数えない（月に3日）", dict(form="CC2s", drop=2)),
@@ -248,9 +315,7 @@ def main():
                     ("CC2s・業者の取り分 年5%・乗り換えの日を数えない", dict(form="CC2s", drop=1, markup=5.0)), ("（参考）流れだけ・買いと売り", dict(form="TREND")), ("（参考）キャリーだけ", dict(form="CC1"))):
         rs, c = pack(**kw)
         mid = c.index[len(c) // 2]
-        z = pd.concat([idx2, c], axis=1, sort=True).dropna()
-        z.columns = ["i", "c"]
-        z = z[z.index >= "2001-01-01"]
+        z = joined(c)
         b0 = st20(z["i"])
         mix = z["i"] + 2.0 * z["c"]
         s1 = st20(mix)
@@ -258,6 +323,7 @@ def main():
         epc = [float(c[(c.index > a) & (c.index <= b)].sum()) for _, a, b in EP2]
         keep[lab] = (z, b0, s2)
         lines.append(f"| {lab} | {sh(rs[0]):+.2f} | {sh(rs[1]):+.2f} | {sh(c):+.2f} | {sh(c[c.index <= mid]):+.2f}／{sh(c[c.index > mid]):+.2f} | {sum(x > 0 for x in epc)} / 9 | "
+                     f"{s1['cagr'] * 100:+.1f}%・{s1['dd'] * 100:.1f}%（{b0['cagr'] * 100:+.1f}%・{b0['dd'] * 100:.1f}%） | "
                      f"{s2['cagr'] * 100:+.1f}%（{b0['cagr'] * 100:+.1f}%） | {sum(s2['ep']) * 100:+.0f}%（{sum(b0['ep']) * 100:+.0f}%） | {s2['wy'] * 100:+.1f}%（{b0['wy'] * 100:+.1f}%） | {sh(mix):+.2f}（{sh(z['i']):+.2f}） |")
         print(lines[-1], flush=True)
     z, b0, _ = keep["**CC2s（流れ：期近の値段そのまま）**"]
@@ -267,8 +333,11 @@ def main():
         f = lambda r: float(np.prod(1 + r[(r.index > a) & (r.index <= b)]) - 1) * 100       # noqa: E731
         lines.append(f"| {lab} | {f(z['i']):+.1f}% | {f(2.0 * z['c']):+.1f}% | {f(z['i'] + 2.0 * z['c']):+.1f}% |")
     y = (1 + z["c"]).groupby(z.index.year).prod() - 1
+    yi = (1 + z["i"]).groupby(z.index.year).prod() - 1
+    ym = (1 + z["i"] + 2.0 * z["c"]).groupby(z.index.year).prod() - 1
     lines += ["", "- エネルギーの層（CC2s、原油・天然ガスそれぞれ 年5% の大きさ＝上の半分）の年ごとの損益（%）：" + " ".join(f"{str(k)[2:]}年 {v * 100:+.0f}" for k, v in y.items()),
-              f"- 指数の口座との、日々の損益の相関：{z.corr().iloc[0, 1]:+.2f}（{z.index[0].date()}〜{z.index[-1].date()}）。"]
+              "- 年ごと（%）：指数の口座だけ → エネルギーの層（各10%）を足した場合：" + " ".join(f"{str(k)[2:]}年 {yi[k] * 100:+.0f}→{ym[k] * 100:+.0f}" for k in yi.index),
+              f"- 指数の口座との、日々の損益の相関：{z[(z['i'] != 0) & (z['c'] != 0)].corr().iloc[0, 1]:+.2f}（{z.index[0].date()}〜{z.index[-1].date()}）。"]
     # ---------- OANDA の CFD の値段の作り（書き出しのフォルダがあるとき）
     folder = sys.argv[1] if len(sys.argv) > 1 else None
     if folder and os.path.isdir(folder):
@@ -293,8 +362,48 @@ def main():
             lines.append(f"| {sym} | {zz['o'].corr(zz['c1']):.2f} | {zz['o'].corr(zz['c2']):.2f} | {zz['o'].corr(zz['ro']):.2f} | {rd['o'].mean() * 100:+.2f}% | {rd['c1'].mean() * 100:+.2f}% | {rd['ro'].mean() * 100:+.2f}% | "
                          f"{np.median(lv.iloc[:, 0] / lv.iloc[:, 1]):.3f} | {np.log1p(zz['o']).sum():+.2f} | {np.log1p(zz['c1']).sum():+.2f} | {np.log1p(zz['ro']).sum():+.2f} |")
             print(lines[-1], flush=True)
-        lines += ["", "- OANDA の値段は、乗り換えの日に段差がなく（乗り換え込みの値動きと同じ）、長い目の水準は期近に付いていく。つまり「期近と2番目を混ぜた、連続の値段」で、",
-                  "  限月どうしの差は、値段ではなくスワップ（毎日の受け払い）で調整されている。買いの損益（値段の変化 ＋ スワップ）は、先物を持って乗り換えた損益 − 業者の取り分 に当たる。"]
+        lines += ["", "- OANDA の値段は、乗り換えの日に段差がなく（乗り換え込みの値動きと同じ）、長い目の水準は期近に付いていく。",
+                  "  作りの詳しい確かめは `cfd_construction.py`：期近の先物を参照し、期限の数日前に次の先物へ乗り換える。乗り換えで値段は飛ばさず、次の期限までに先物の値段へ近づけていく。",
+                  "  公式の説明では、この「近づく値動き」をスワップで打ち消すので、買いの損益（値段の変化 ＋ スワップ）は、参照している先物を持った損益 − 業者の取り分 に当たる。"]
+    # ---------- OANDA の作りどおりの損益（参照している先物＝期近を持つ）で計算し直す
+    lines += ["", "## 8 OANDA の作りどおりの損益で計算し直す（期近を持ち、期限の lead 営業日前に乗り換える。業者の取り分 年2.5%・スプレッド込み）", "",
+              "右の列は 5 と同じ：指数の口座（戻り 5% ＋ 順張り 10%）と同じ資金に、原油・天然ガスそれぞれ 年10% で足した場合。", "",
+              "| 合図 | lead（原油・天然ガス） | 原油 | 天然ガス | 合わせて | 前半／後半 | 2009年〜 | 2017年〜 | 最大の下落（合わせた層・年10%） | 指数の戻りの層との相関 | 急落の局面の合計（合わせた層） | 急落の局面でプラス | "
+              "足しただけ：年率・最大の下落（指数だけ） | 同じ最大の下落に縮めた：年率（指数だけ） | 急落の9局面の合計（指数だけ） | 最悪の年（指数だけ） | シャープ（指数だけ） |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    verdict = {}
+    for signal in ("S1", "S2"):
+        for la, lb in ((1, 3), (1, 1), (3, 3), (5, 5)):
+            rs = []
+            for (name, (group, code, spread)), lead in zip(SERIES.items(), (la, lb)):
+                rr, _, _ = simulate_active(fetch(group, code), spread, group, signal, lead)
+                rs.append(rr.iloc[260:])
+            c = pd.concat(rs, axis=1, sort=True).dropna().mean(axis=1)
+            mid = c.index[len(c) // 2]
+            both = pd.concat([idx, c], axis=1, sort=True).dropna()
+            rho = both.corr().iloc[0, 1]
+            epc = [float(c[(c.index > a) & (c.index <= b)].sum()) for _, a, b in EP]
+            z = joined(c)
+            b0 = st20(z["i"])
+            mix = z["i"] + 2.0 * z["c"]
+            s1 = st20(mix)
+            s2 = st20(mix * (b0["dd"] / s1["dd"]))
+            if (la, lb) == (1, 3):
+                verdict[signal] = dict(sh=sh(c), a=sh(c[c.index <= mid]), b=sh(c[c.index > mid]), each=(sh(rs[0]), sh(rs[1])), rho=rho, ep=sum(epc))
+            lines.append(f"| {signal} | {la}・{lb}{'（判定に使う）' if (la, lb) == (1, 3) else ''} | {sh(rs[0]):+.2f} | {sh(rs[1]):+.2f} | {sh(c):+.2f} | {sh(c[c.index <= mid]):+.2f}／{sh(c[c.index > mid]):+.2f} | "
+                         f"{sh(c[c.index >= '2009-01-01']):+.2f} | {sh(c[c.index >= '2017-01-01']):+.2f} | {mdd(c) * 100:.0f}% | {rho:+.2f} | {sum(epc) * 100:+.1f}% | {sum(x > 0 for x in epc)} / 9 | "
+                         f"{s1['cagr'] * 100:+.1f}%・{s1['dd'] * 100:.1f}%（{b0['cagr'] * 100:+.1f}%・{b0['dd'] * 100:.1f}%） | {s2['cagr'] * 100:+.1f}%（{b0['cagr'] * 100:+.1f}%） | "
+                         f"{sum(s2['ep']) * 100:+.0f}%（{sum(b0['ep']) * 100:+.0f}%） | {s2['wy'] * 100:+.1f}%（{b0['wy'] * 100:+.1f}%） | {sh(mix):+.2f}（{sh(z['i']):+.2f}） |")
+            print(lines[-1], flush=True)
+    lines += ["", "判定（1〜4 と同じ基準。lead は 原油 1・天然ガス 3）：", "",
+              "| 合図 | (a) シャープ 0.4 以上・前半後半ともプラス | (b) 原油・天然ガスとも単独でプラス | (c) 相関 ±0.2 以内 | (d) 急落の局面の合計がマイナスでない | 判定 |", "|---|---|---|---|---|---|"]
+    for signal, x in verdict.items():
+        a = x["sh"] >= 0.4 and x["a"] > 0 and x["b"] > 0
+        b = x["each"][0] > 0 and x["each"][1] > 0
+        c_ok = abs(x["rho"]) <= 0.2
+        d = x["ep"] >= 0
+        lines.append(f"| {signal} | {'○' if a else '×'}（{x['sh']:+.2f}、{x['a']:+.2f}／{x['b']:+.2f}） | {'○' if b else '×'}（{x['each'][0]:+.2f}・{x['each'][1]:+.2f}） | {'○' if c_ok else '×'}（{x['rho']:+.2f}） | "
+                     f"{'○' if d else '×'}（{x['ep'] * 100:+.1f}%） | {'**候補**' if (a and b and c_ok and d) else '不合格'} |")
+        print(lines[-1], flush=True)
     out = os.path.join(F.ROOT, "reports", "research", "commodity_carry.md")
     open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 
