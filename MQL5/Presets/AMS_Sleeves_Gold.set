@@ -1,10 +1,11 @@
-; AdaptiveMultiStrategyEA - gold trend sleeve (entry mode 8, chapter 93). No specific days and no time-of-day habits are used for decisions.
-; For a commodity CFD account (OANDA: a separate sub-account from FX and from indices).
-; Trend (long only): hold gold while the close is above the 200-day average, reviewed every 7 days.
-; Sizing: the position's own volatility is 11.2% of equity per year (trend sleeve about 10% per year).
-; The chapter-98 additions (HAR-type volatility forecast, VIX multiplier, daily stop) were validated for the index reversion sleeve only,
-; so this preset keeps the validated form: 60-day volatility, no VIX multiplier, no stop.
-; Attach to an XAUUSD chart (H1).
+; AdaptiveMultiStrategyEA - gold trend sleeve, SMALL setting (about 0.2 x Kelly on the 20-year Sharpe of 0.5). No stop.
+; Rule (unchanged since chapter 93): hold gold while its daily close is above the 200-day average, reviewed every 7 days. Long only.
+; No specific days and no time-of-day habits are used for decisions.
+; For the OANDA commodity CFD account (a separate sub-account; account leverage 1:100, gold margin 5%). Attach to an XAUUSD chart (H1).
+; Numbers below: MT5 tester on OANDA's own data with the account's real leverage, JPY 3,000,000, measured on daily equity (chapter 105).
+;   last 3 years, real ticks (Nov 2023 - Nov 2026): +69% (+19% per year), drawdown 10%, best 12 months +50%, worst -1%.
+;   2007 - 2026 (20 years, M1 OHLC): +175% (+5% per year), Sharpe 0.56, drawdown 34%, worst 12 months -18%.
+;   It lost in 2012-2018 every year (-2% to -10%) and in 2021-2022; it earns only while gold keeps trending.
 InpEntryMode=8
 InpIxRevSymbols=none
 InpIxTrendSymbols=XAUUSD
@@ -14,7 +15,7 @@ InpIxRuleIBS=false
 InpIxRevUnitVol=0.0
 InpIxTrendUnitVol=11.2
 InpIxTrendCheckDays=7
-InpIxMaxLev=3.0
+InpIxMaxLev=10.0
 InpIxBand=0.25
 InpIxSLVolMul=0.0
 InpIxVolModel=0
@@ -24,9 +25,9 @@ InpIxSoGuard=0.9
 InpIxFlatMinutes=0
 InpIxDelayMin=5
 InpIxMaxSpreadPct=0.05
-InpMaxMarginUsePct=80.0
+InpMaxMarginUsePct=90.0
 InpIxJointRound=false
-InpIxWarmStart=false
+InpIxWarmStart=true
 InpIxRegimeDays=0
 InpIxRegimeRef=none
 InpIxDryRun=false

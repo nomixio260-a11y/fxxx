@@ -1,0 +1,37 @@
+; AdaptiveMultiStrategyEA - gold trend sleeve, MAXIMUM setting (about 0.85 x Kelly on the 20-year Sharpe of 0.5; beyond this, long-run growth falls). VERY HIGH RISK.
+; Rule (unchanged since chapter 93): hold gold while its daily close is above the 200-day average, reviewed every 7 days. Long only.
+; No specific days and no time-of-day habits are used for decisions.
+; For the OANDA commodity CFD account (a separate sub-account; account leverage 1:100, gold margin 5%). Attach to an XAUUSD chart (H1).
+; Numbers below: MT5 tester on OANDA's own data with the account's real leverage, JPY 3,000,000, measured on daily equity (chapter 105).
+;   last 3 years, real ticks: +648% (+94% per year), drawdown 51%, worst day -12.7%, best 12 months +510%, worst -23%.
+;     By year: 2024 +94%, 2025 +330% (the one calendar year above +300%), 2026 -21%.
+;   2007 - 2026: +1,209% (+14% per year), Sharpe 0.51, DRAWDOWN 89%, worst 12 months -60%.
+;     Losing years: 2012-2018 seven in a row (-23, -10, -41, -15, -19, -29, -7%), 2021 -40%, 2022 -19%.
+;     12-month results of +300% or more: 1% of all 12-month windows in 20 years (all of them in 2025).
+;   If the true Sharpe is half of the measured one, this size is about 1.7 x Kelly: growth drops to half and a halving of the account is likely (89%).
+InpEntryMode=8
+InpIxRevSymbols=none
+InpIxTrendSymbols=XAUUSD
+InpIxRuleR2=false
+InpIxRuleD7=false
+InpIxRuleIBS=false
+InpIxRevUnitVol=0.0
+InpIxTrendUnitVol=50.0
+InpIxTrendCheckDays=7
+InpIxMaxLev=10.0
+InpIxBand=0.25
+InpIxSLVolMul=4.0
+InpIxVolModel=0
+InpIxVixFile=none
+InpIxRuleWeights=1,2,3
+InpIxSoGuard=0.9
+InpIxFlatMinutes=0
+InpIxDelayMin=5
+InpIxMaxSpreadPct=0.05
+InpMaxMarginUsePct=90.0
+InpIxJointRound=false
+InpIxWarmStart=true
+InpIxRegimeDays=0
+InpIxRegimeRef=none
+InpIxDryRun=false
+InpIxEquityOffset=0
